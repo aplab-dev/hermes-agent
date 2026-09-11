@@ -574,6 +574,10 @@ def _resolve_config_cwd(env_type: str, mount_docker_cwd: bool) -> tuple:
     """
     default_cwd = _safe_getcwd() if env_type == "local" else _DEFAULT_CWD_BY_BACKEND.get(env_type, "/root")
     cwd = _tenv("TERMINAL_CWD", default_cwd)
+    # ``hermes --in DIR`` pins the working directory for this CLI process; it must beat the
+    # config.yaml ``terminal.cwd`` re-bridge (see hermes_cli.main._apply_in_dir).
+    if env_type == "local" and os.environ.get("HERMES_CLI_IN_DIR", "").strip():
+        cwd = os.environ["HERMES_CLI_IN_DIR"]
     from hermes_cli.config import _is_ssh_remote_tilde_cwd
     if cwd and not _is_ssh_remote_tilde_cwd(env_type, cwd):
         cwd = os.path.expanduser(cwd)

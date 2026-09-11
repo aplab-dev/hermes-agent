@@ -1463,6 +1463,10 @@ def _apply_in_dir(args) -> None:
     # container backends keep their own remote/sandbox default).
     if os.environ.get("TERMINAL_CWD", "").strip():
         os.environ["TERMINAL_CWD"] = _target_dir
+    # Dedicated carrier for the pin: TERMINAL_CWD is re-bridged from config.yaml (terminal.cwd) and
+    # re-loaded from .env at several points during a turn, which silently discarded --in for the
+    # one-shot path. tools.terminal_tool reads this first for the local backend.
+    os.environ["HERMES_CLI_IN_DIR"] = _target_dir
     args.no_restore_cwd = True
 
 

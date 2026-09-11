@@ -72,6 +72,14 @@ def _resolve_configured_cwd(*, override_is_final: bool) -> Path | None:
     ``override_is_final``: a set-but-missing session override yields None
     instead of falling through to TERMINAL_CWD.
     """
+    # ``hermes --in DIR`` (hermes_cli.main._apply_in_dir) pins the CLI process to DIR. It is carried in
+    # its own variable because TERMINAL_CWD is re-bridged from config.yaml / .env during a turn, which
+    # made the prompt, file tools and terminal disagree with the directory the user asked for.
+    pinned = os.environ.get("HERMES_CLI_IN_DIR", "").strip()
+    if pinned:
+        p = _existing_dir(pinned, "--in directory")
+        if p is not None:
+            return p
     override = _SESSION_CWD.get()
     override = "" if override is _UNSET else str(override).strip()
     if override:
