@@ -237,6 +237,50 @@ function ToolCallBlock({
   );
 }
 
+const TOOL_RESULT_PREVIEW_CHARS = 600;
+
+/** Tool results are machine output, not prose: pretty-print JSON, keep whitespace for
+ *  terminal output, and collapse anything long behind an expand toggle. */
+function ToolResultBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  const { t } = useI18n();
+
+  let text = content;
+  let isJson = false;
+  const trimmed = content.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      text = JSON.stringify(JSON.parse(trimmed), null, 2);
+      isJson = true;
+    } catch {
+      // not JSON — render verbatim
+    }
+  }
+  const isLong = text.length > TOOL_RESULT_PREVIEW_CHARS;
+  const shown = isLong && !open ? text.slice(0, TOOL_RESULT_PREVIEW_CHARS) + "\n…" : text;
+
+  return (
+    <div className="mt-1">
+      <pre
+        className={`overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90 ${open ? "max-h-[32rem] overflow-y-auto" : ""}`}
+        data-tool-result-json={isJson || undefined}
+      >
+        {shown}
+      </pre>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="mt-1 text-xs text-warning hover:underline"
+          aria-expanded={open}
+        >
+          {open ? t.common.collapse : `${t.common.expand} (${text.length.toLocaleString()} chars)`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // Context-compaction handoff blocks are persisted as ``role="user"`` or
 // ``role="assistant"`` with content starting with one of these prefixes —
 // they're metadata inserted by ``agent/context_compressor.py``, NOT real
@@ -294,9 +338,11 @@ function splitCompactionContent(content: string): CompactionSplit | null {
 function MessageBubble({
   msg,
   highlight,
+  elapsedLabel,
 }: {
   msg: SessionMessage;
   highlight?: string;
+  elapsedLabel?: string;
 }) {
   const { t } = useI18n();
 
@@ -408,12 +454,19 @@ function MessageBubble({
             {timeAgo(msg.timestamp)}
           </span>
         )}
+        {elapsedLabel && (
+          <span className="font-mono-ui text-xs text-text-tertiary" title="since the first message of the session">
+            {elapsedLabel}
+          </span>
+        )}
       </div>
       {msg.content &&
         (msg.role === "system" ? (
           <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">
             {msg.content}
           </div>
+        ) : msg.role === "tool" && !isCompaction ? (
+          <ToolResultBlock content={msg.content} />
         ) : (
           <Markdown content={msg.content} highlightTerms={highlightTerms} />
         ))}
@@ -426,6 +479,17 @@ function MessageBubble({
       )}
     </div>
   );
+}
+
+/** "+12.3s" since the first timestamped message — the same reading as a CLI trace,
+ *  so a slow step is visible without comparing wall-clock times. Unix seconds in, like timeAgo(). */
+function elapsedSinceStart(messages: SessionMessage[], index: number): string | undefined {
+  const first = messages.find((m) => typeof m.timestamp === "number")?.timestamp;
+  const ts = messages[index]?.timestamp;
+  if (typeof first !== "number" || typeof ts !== "number") return undefined;
+  const delta = Math.max(0, ts - first);
+  if (delta < 60) return `+${delta.toFixed(1)}s`;
+  return `+${Math.floor(delta / 60)}m${Math.round(delta % 60)}s`;
 }
 
 /** Message list with auto-scroll to first search hit. */
@@ -456,7 +520,12 @@ function MessageList({
       className="flex flex-col gap-3 max-h-[600px] overflow-y-auto pr-2"
     >
       {messages.map((msg, i) => (
-        <MessageBubble key={i} msg={msg} highlight={highlight} />
+        <MessageBubble
+          key={i}
+          msg={msg}
+          highlight={highlight}
+          elapsedLabel={elapsedSinceStart(messages, i)}
+        />
       ))}
     </div>
   );
@@ -828,7 +897,7 @@ export default function SessionsPage() {
   const logScrollRef = useRef<HTMLPreElement | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [overviewSessions, setOverviewSessions] = useState<SessionInfo[]>([]);
-  const [view, setView] = useState<SessionsView>("overview");
+  const [view, setView] = useState<SessionsView>("list");
   const [sessionCategory, setSessionCategory] =
     useState<SessionFilterCategory>("chats");
   const [sourceSelectionsByCategory, setSourceSelectionsByCategory] =
