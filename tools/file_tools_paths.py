@@ -120,6 +120,11 @@ def _authoritative_workspace_root(task_id: str = "default") -> str | None:
     ``cd`` never leaks into another); (2) a registered raw-keyed cwd override
     (TUI/Desktop/ACP); (3) a sentinel-free absolute ``$TERMINAL_CWD``.
     """
+    # ``hermes --in DIR`` pins this CLI process to DIR (hermes_cli.main._apply_in_dir); relative
+    # file paths must anchor there, not on config.yaml's terminal.cwd.
+    pinned = _sentinel_free_abs_cwd(os.environ.get("HERMES_CLI_IN_DIR") or None)
+    if pinned:
+        return pinned
     try:
         from tools.terminal_tool import get_session_cwd
 
