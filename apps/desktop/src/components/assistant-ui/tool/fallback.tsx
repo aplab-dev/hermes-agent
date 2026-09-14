@@ -22,6 +22,7 @@ import { TimelineTimestamp } from '@/components/assistant-ui/thread/timeline-tim
 import { useElapsedSeconds } from '@/components/chat/activity-timer'
 import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { CompactMarkdown } from '@/components/chat/compact-markdown'
+import { DocumentDetail, readFileDocument } from './document-detail'
 import { FileDiffPanel } from '@/components/chat/diff-lines'
 import { DisclosureRow } from '@/components/chat/disclosure-row'
 import {
@@ -695,7 +696,12 @@ function ToolEntry({ part }: ToolEntryProps) {
             ) : (
               <div className="max-w-full text-xs leading-relaxed text-(--ui-text-secondary)">
                 {view.detailLabel && <p className={TOOL_SECTION_LABEL_CLASS}>{view.detailLabel}</p>}
-                {renderDetailAsCode ? (
+                {part.toolName === 'read_file' && readFileDocument(part.result) !== null ? (
+                  <DocumentDetail
+                    content={readFileDocument(part.result) ?? ''}
+                    path={typeof (part.args as { path?: unknown } | undefined)?.path === 'string' ? (part.args as { path: string }).path : undefined}
+                  />
+                ) : renderDetailAsCode ? (
                   <pre className={cn(TOOL_SECTION_PRE_CLASS, 'whitespace-pre-wrap wrap-anywhere')}>
                     {view.rendersAnsi ? <AnsiText text={clampForDisplay(view.detail)} /> : clampForDisplay(view.detail)}
                   </pre>
