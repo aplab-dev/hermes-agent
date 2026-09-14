@@ -48,6 +48,7 @@ import type {
 } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import { Markdown } from "@/components/Markdown";
+import { DocumentView } from "@/components/DocumentView";
 import { PlatformsCard } from "@/components/PlatformsCard";
 import { Toast } from "@nous-research/ui/ui/components/toast";
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -241,9 +242,30 @@ const TOOL_RESULT_PREVIEW_CHARS = 600;
 
 /** Tool results are machine output, not prose: pretty-print JSON, keep whitespace for
  *  terminal output, and collapse anything long behind an expand toggle. */
-function ToolResultBlock({ content }: { content: string }) {
+function ToolResultBlock({
+  content,
+  toolName,
+  toolArgs,
+}: {
+  content: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+}) {
   const [open, setOpen] = useState(false);
   const { t } = useI18n();
+
+  // read_file results are documents, not logs: render CSV/XLSX as tables, Markdown as Markdown.
+  if (toolName === "read_file") {
+    try {
+      const parsed = JSON.parse(content.trim()) as { content?: unknown; error?: unknown };
+      if (typeof parsed.content === "string" && !parsed.error) {
+        const path = typeof toolArgs?.path === "string" ? toolArgs.path : undefined;
+        return <DocumentView path={path} content={parsed.content} />;
+      }
+    } catch {
+      // fall through to the generic renderer
+    }
+  }
 
   let text = content;
   let isJson = false;
@@ -400,10 +422,13 @@ function MessageBubble({
   msg,
   highlight,
   elapsedLabel,
+  toolArgs,
 }: {
   msg: SessionMessage;
   highlight?: string;
   elapsedLabel?: string;
+  /** Arguments of the tool call this ``role: tool`` message answers (by tool_call_id). */
+  toolArgs?: Record<string, unknown>;
 }) {
   const { t } = useI18n();
 
@@ -530,7 +555,7 @@ function MessageBubble({
             {msg.content}
           </div>
         ) : msg.role === "tool" && !isCompaction ? (
-          <ToolResultBlock content={msg.content} />
+          <ToolResultBlock content={msg.content} toolName={msg.tool_name} toolArgs={toolArgs} />
         ) : (
           <Markdown content={msg.content} highlightTerms={highlightTerms} />
         ))}
@@ -566,6 +591,18 @@ function MessageList({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // tool_call_id -> parsed arguments, so a tool result can be rendered knowing e.g. the file path.
+  const toolArgsById = new Map<string, Record<string, unknown>>();
+  for (const m of messages) {
+    for (const tc of m.tool_calls ?? []) {
+      try {
+        toolArgsById.set(tc.id, JSON.parse(tc.function.arguments) as Record<string, unknown>);
+      } catch {
+        // unparsable arguments: no path hint
+      }
+    }
+  }
+
   useEffect(() => {
     if (!highlight || !containerRef.current) return;
     // Scroll to first hit after render
@@ -589,6 +626,7 @@ function MessageList({
           msg={msg}
           highlight={highlight}
           elapsedLabel={elapsedSinceStart(messages, i)}
+          toolArgs={msg.tool_call_id ? toolArgsById.get(msg.tool_call_id) : undefined}
         />
       ))}
     </div>
