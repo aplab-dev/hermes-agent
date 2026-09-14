@@ -247,10 +247,22 @@ function ToolResultBlock({ content }: { content: string }) {
 
   let text = content;
   let isJson = false;
+  // Long multi-line string fields (terminal output, file contents) are unreadable as
+  // escaped "\n" inside JSON — lift them out into their own verbatim blocks below.
+  const lifted: Array<{ key: string; value: string }> = [];
   const trimmed = content.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
-      text = JSON.stringify(JSON.parse(trimmed), null, 2);
+      const parsed: unknown = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+          if (typeof value === "string" && value.includes("\n") && value.length > 80) {
+            lifted.push({ key, value });
+            (parsed as Record<string, unknown>)[key] = `<${value.length.toLocaleString()} chars — see "${key}" below>`;
+          }
+        }
+      }
+      text = JSON.stringify(parsed, null, 2);
       isJson = true;
     } catch {
       // not JSON — render verbatim
@@ -275,6 +287,29 @@ function ToolResultBlock({ content }: { content: string }) {
           aria-expanded={open}
         >
           {open ? t.common.collapse : `${t.common.expand} (${text.length.toLocaleString()} chars)`}
+        </button>
+      )}
+      {lifted.map(({ key, value }) => (
+        <LiftedField key={key} name={key} value={value} />
+      ))}
+    </div>
+  );
+}
+
+function LiftedField({ name, value }: { name: string; value: string }) {
+  const [open, setOpen] = useState(false);
+  const { t } = useI18n();
+  const isLong = value.length > TOOL_RESULT_PREVIEW_CHARS;
+  const shown = isLong && !open ? value.slice(0, TOOL_RESULT_PREVIEW_CHARS) + "\n…" : value;
+  return (
+    <div className="mt-2 border-l-2 border-warning/30 pl-3">
+      <div className="mb-1 font-mono-ui text-xs text-warning/70">{name}</div>
+      <pre className={`overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/90 ${open ? "max-h-[32rem] overflow-y-auto" : ""}`}>
+        {shown}
+      </pre>
+      {isLong && (
+        <button type="button" onClick={() => setOpen(!open)} className="mt-1 text-xs text-warning hover:underline" aria-expanded={open}>
+          {open ? t.common.collapse : `${t.common.expand} (${value.length.toLocaleString()} chars)`}
         </button>
       )}
     </div>
