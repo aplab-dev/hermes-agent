@@ -134,8 +134,20 @@ def _managed_files_policy(request: Request, *, create_root: bool = True) -> Mana
         root = _ensure_managed_root(_HOSTED_MANAGED_FILES_ROOT) if create_root else _HOSTED_MANAGED_FILES_ROOT
         return ManagedFilesPolicy(default_path=root, locked_root=root, can_change_path=False)
 
-    home = _canonical_path(Path.home())
-    return ManagedFilesPolicy(default_path=home, locked_root=None, can_change_path=True)
+    # Start the browser in the agent's configured working directory (terminal.cwd) when it is an
+    # absolute existing directory; browsing outside it stays allowed. Falls back to the home dir.
+    default_path = _canonical_path(Path.home())
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        raw_cwd = str(((load_config_readonly() or {}).get("terminal") or {}).get("cwd") or "").strip()
+        if raw_cwd and raw_cwd not in {".", "auto", "cwd"}:
+            candidate = Path(raw_cwd).expanduser()
+            if candidate.is_absolute() and candidate.is_dir():
+                default_path = _canonical_path(candidate)
+    except Exception:
+        pass
+    return ManagedFilesPolicy(default_path=default_path, locked_root=None, can_change_path=True)
 
 
 def _resolve_managed_path(

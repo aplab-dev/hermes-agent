@@ -30,7 +30,14 @@ import {
 } from 'electron'
 
 import { classifyActiveRuntime } from './active-runtime-state'
-import { destroyKeepaliveAgents, downloadAgentFor, jsonAgentFor, withRetry } from './api-transport'
+import {
+  destroyKeepaliveAgents,
+  downloadAgentFor,
+  httpStatusError,
+  jsonAgentFor,
+  readStatusCode,
+  withRetry
+} from './api-transport'
 import { appIconCandidates, resolveAppIcon } from './app-icon'
 import { stopBackendChild as stopBackendChildImpl, stopBackendTreesForUpdate } from './backend-child'
 import {
@@ -68,6 +75,7 @@ import { isPidAliveWindows, waitForBackendRelease } from './backend-release-gate
 import {
   isHostKeyChangedBootFailure,
   isRetryableRemoteBootFailure,
+  shouldHoldBootProgressForReauth,
   shouldLatchBackendStartFailure,
   shouldLatchHostKeyChangedFailure,
   shouldLatchRemoteReauthFailure
@@ -259,7 +267,8 @@ import {
   resolveGatedDownloadAuth,
   resolveJsonBody,
   resolveOauthRestAuth,
-  resolveReadinessProbeAuth
+  resolveReadinessProbeAuth,
+  shouldRotateNativeTokenAfterRejection
 } from './native-auth-decisions'
 import {
   nativeRefreshUrl,
@@ -2238,6 +2247,12 @@ function abandonFirstRunSetupChoiceForRemoteApply() {
 }
 
 function updateBootProgress(update, options: { allowDecrease?: boolean } = {}) {
+  // A latched reauth rejection owns the boot surface until a recovery path
+  // clears it; see shouldHoldBootProgressForReauth (#95701).
+  if (shouldHoldBootProgressForReauth(remoteReauthFailure ? remoteReauthFailure.message : null, update)) {
+    return
+  }
+
   const nextProgressRaw =
     typeof update.progress === 'number' ? clampBootProgress(update.progress) : bootProgressState.progress
 
@@ -5374,7 +5389,7 @@ function fetchJson(url, token, options: any = {}) {
               const text = Buffer.concat(chunks).toString('utf8')
 
               if ((res.statusCode || 500) >= 400) {
-                reject(new Error(`${res.statusCode}: ${text || res.statusMessage}`))
+                reject(httpStatusError(res.statusCode, text, res.statusMessage))
 
                 return
               }
@@ -5540,7 +5555,7 @@ function fetchPublicJson(url, options: any = {}) {
               const text = Buffer.concat(chunks).toString('utf8')
 
               if ((res.statusCode || 500) >= 400) {
-                reject(new Error(`${res.statusCode}: ${text || res.statusMessage}`))
+                reject(httpStatusError(res.statusCode, text, res.statusMessage))
 
                 return
               }
@@ -7813,9 +7828,7 @@ function fetchJsonViaOauthSession(url, options: any = {}) {
         const statusCode = res.statusCode || 500
 
         if (statusCode >= 400) {
-          const err = new Error(`${statusCode}: ${text || ''}`) as any
-          err.statusCode = statusCode
-          reject(err)
+          reject(httpStatusError(statusCode, text))
 
           return
         }
@@ -7949,14 +7962,20 @@ function postJsonNoAuth(url: string, body: unknown, opts: any = {}) {
 // Return a valid native access token for baseUrl, refreshing via
 // /auth/native/refresh if the stored one is at/near expiry. Returns null when
 // there are no tokens or the refresh is terminally rejected (caller re-logins).
-async function ensureNativeAccessToken(baseUrl: string): Promise<string | null> {
+// `forceRefresh` rotates even a locally-unexpired access token: the gateway
+// never rotates a native bearer server-side, so after the gate rejects one
+// the desktop must run the refresh itself before the rejection is confirmed.
+async function ensureNativeAccessToken(
+  baseUrl: string,
+  options: { forceRefresh?: boolean } = {}
+): Promise<string | null> {
   const tokens = _loadNativeTokens(baseUrl)
 
   if (!tokens) {
     return null
   }
 
-  if (!tokenNeedsRefresh(tokens, Math.floor(Date.now() / 1000))) {
+  if (!options.forceRefresh && !tokenNeedsRefresh(tokens, Math.floor(Date.now() / 1000))) {
     return tokens.accessToken
   }
 
@@ -8087,10 +8106,7 @@ function downloadViaOauthSessionToFile(url, ctx, options: any = {}) {
 // can trigger the 404-only compatibility fallback.
 async function finalizeGatewayDownload(res, statusCode, headers, ctx: any = {}) {
   if (statusCode >= 400) {
-    const message = await readGatewayErrorText(res)
-    const error: any = new Error(`${statusCode}: ${message}`)
-    error.statusCode = statusCode
-    throw error
+    throw httpStatusError(statusCode, await readGatewayErrorText(res))
   }
 
   const disposition = headers['content-disposition'] || headers['Content-Disposition']
@@ -8286,20 +8302,33 @@ async function mintGatewayWsTicket(baseUrl, headers = {}) {
     const nativeAt = await ensureNativeAccessToken(baseUrl).catch(() => null)
 
     if (nativeAt) {
-      const body = (await fetchJson(`${baseUrl}/api/auth/ws-ticket`, null, {
-        method: 'POST',
-        timeoutMs: 8_000,
-        bearer: nativeAt,
-        headers
-      })) as any
+      try {
+        return await mintGatewayWsTicketWithBearer(baseUrl, nativeAt, headers)
+      } catch (error) {
+        // The gate rejected a bearer the desktop still considered valid. It
+        // never rotates a native access token server-side (only cookie
+        // sessions get the transparent refresh; the native flow is told to
+        // call /auth/native/refresh itself), so run ONE forced rotation here:
+        // a live refresh token yields a fresh bearer and the mint is retried
+        // once; a dead one drops the stored set, and the original 401 stands
+        // as a CONFIRMED rejection that latches into the Sign in overlay
+        // instead of being replayed by every boot retry (#95701).
+        if (!shouldRotateNativeTokenAfterRejection(error)) {
+          throw error
+        }
 
-      const ticket = body?.ticket
+        // A dead refresh token returns null (tokens dropped) and the original
+        // 401 stands. A refresh that could not be evaluated at all (5xx,
+        // timeout, ECONNRESET) is a transport blip, not a verdict on the
+        // session — let it propagate so the boot stays retryable.
+        const rotatedAt = await ensureNativeAccessToken(baseUrl, { forceRefresh: true })
 
-      if (!ticket || typeof ticket !== 'string') {
-        throw new Error('Gateway did not return a WS ticket.')
+        if (!rotatedAt || rotatedAt === nativeAt) {
+          throw error
+        }
+
+        return await mintGatewayWsTicketWithBearer(baseUrl, rotatedAt, headers)
       }
-
-      return ticket
     }
 
     const body = (await fetchJsonViaOauthSession(`${baseUrl}/api/auth/ws-ticket`, {
@@ -8316,6 +8345,26 @@ async function mintGatewayWsTicket(baseUrl, headers = {}) {
 
     return ticket
   })
+}
+
+// One bearer-authenticated ticket mint. Kept separate from the rotation
+// decision in mintGatewayWsTicket so the retry-after-refresh leg presents the
+// rotated bearer through exactly the same request shape as the first attempt.
+async function mintGatewayWsTicketWithBearer(baseUrl, bearer, headers = {}) {
+  const body = (await fetchJson(`${baseUrl}/api/auth/ws-ticket`, null, {
+    method: 'POST',
+    timeoutMs: 8_000,
+    bearer,
+    headers
+  })) as any
+
+  const ticket = body?.ticket
+
+  if (!ticket || typeof ticket !== 'string') {
+    throw new Error('Gateway did not return a WS ticket.')
+  }
+
+  return ticket
 }
 
 // Build a fresh WS URL for the *current* connection. Critical for reconnects:
@@ -10086,6 +10135,12 @@ async function buildRemoteConnection(
       throw makeUnsignedOauthError()
     }
 
+    // Snapshot BEFORE the mint: a confirmed native rejection drops the dead
+    // token set on its way out (mintGatewayWsTicket's forced rotation), and
+    // the failure copy must still say "session expired" for a session that
+    // did exist — "not signed in" is for a jar that never held one.
+    const hadNativeSession = hasNativeSession(baseUrl)
+
     let ticket
 
     try {
@@ -10106,7 +10161,7 @@ async function buildRemoteConnection(
 
       throw gatewayTicketFailure(
         error,
-        oauthTicketFailureAuthMessage(hasNativeSession(baseUrl)),
+        oauthTicketFailureAuthMessage(hadNativeSession),
         'Could not reach the remote Hermes gateway while refreshing its WebSocket ticket. Try reconnecting.'
       )
     }
@@ -13287,14 +13342,15 @@ async function startHermes() {
 
     const failedProcess = backendConnectionState.invalidate()
     stopBackendChild(failedProcess)
-    await waitForBackendExit(failedProcess)
 
     if (error instanceof FirstRunSetupResetError) {
+      await waitForBackendExit(failedProcess)
       throw error
     }
 
     const message = error instanceof Error ? error.message : String(error)
     const hostKeyChanged = isHostKeyChangedBootFailure(error)
+    const isReauth = isReauthRequiredError(error)
 
     // Carry structured Cloud-down metadata through the boot-progress / IPC
     // boundary when present, so the renderer overlay can key on it rather than
@@ -13302,11 +13358,7 @@ async function startHermes() {
     // only consumes the structured result (#85335).
     const isCloudBackendDown = Boolean(error && typeof error === 'object' && (error as any).isCloudBackendDown === true)
 
-    const statusCode = Number(
-      error && typeof error === 'object' && Number.isInteger((error as any).statusCode)
-        ? (error as any).statusCode
-        : NaN
-    )
+    const statusCode = readStatusCode(error)
 
     // Only latch LOCAL boot failures. A remote failure (lapsed session / mint
     // timeout / host briefly unreachable across sleep) is transient and has no
@@ -13329,9 +13381,19 @@ async function startHermes() {
 
     // A confirmed reauth rejection latches separately: it can't self-heal, and
     // leaving it unlatched hides the overlay's "Sign in" button on every retry.
-    if (shouldLatchRemoteReauthFailure({ attemptedRemote, isReauth: isReauthRequiredError(error) })) {
+    if (shouldLatchRemoteReauthFailure({ attemptedRemote, isReauth })) {
       remoteReauthFailure = error instanceof Error ? error : new Error(message)
+      rememberLog('[boot] remote reauth latched: holding boot-progress until a recovery path clears it')
     }
+
+    // Every latch above is set BEFORE this first yield back to the event loop.
+    // invalidate() already dropped the shared attempt promise, so a concurrent
+    // getConnection()/startHermes() caller arriving during the exit wait would
+    // otherwise start a brand-new attempt, re-emit running:true over the
+    // failure and re-drive the identical rejection. With the latch in place it
+    // short-circuits on the cached failure instead: the first confirmed
+    // rejection owns the transition into recovery (#95701).
+    await waitForBackendExit(failedProcess)
 
     updateBootProgress(
       {
@@ -13347,7 +13409,7 @@ async function startHermes() {
         // sign-in affordance.
         retryable: isRetryableRemoteBootFailure({
           attemptedRemote,
-          isReauth: isReauthRequiredError(error),
+          isReauth,
           isHostKeyChanged: hostKeyChanged
         }),
         running: false,
