@@ -296,6 +296,32 @@ function ToolResultBlock({ content }: { content: string }) {
   );
 }
 
+/** Collapsed-by-default reasoning ("thinking") block for assistant turns. */
+function ReasoningBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const { t } = useI18n();
+  const words = text.trim().split(/\s+/).length;
+  return (
+    <div className="mb-2 border border-primary/20 bg-primary/5">
+      <ListItem
+        onClick={() => setOpen(!open)}
+        aria-label={`${open ? t.common.collapse : t.common.expand} reasoning`}
+        aria-expanded={open}
+        className="px-3 py-1.5 text-xs text-primary hover:bg-primary/10"
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        <span className="font-mono-ui font-medium">Reasoning</span>
+        <span className="ml-auto text-primary/50">{words.toLocaleString()} words</span>
+      </ListItem>
+      {open && (
+        <pre className="border-t border-primary/20 px-3 py-2 font-mono text-xs leading-relaxed text-foreground/80 whitespace-pre-wrap break-words max-h-[32rem] overflow-y-auto">
+          {text}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function LiftedField({ name, value }: { name: string; value: string }) {
   const [open, setOpen] = useState(false);
   const { t } = useI18n();
@@ -495,6 +521,9 @@ function MessageBubble({
           </span>
         )}
       </div>
+      {msg.role === "assistant" && !isCompaction && (msg.reasoning || msg.reasoning_content) && (
+        <ReasoningBlock text={String(msg.reasoning || msg.reasoning_content)} />
+      )}
       {msg.content &&
         (msg.role === "system" ? (
           <div className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">

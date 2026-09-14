@@ -2055,6 +2055,9 @@ export interface SessionMessage {
   tool_name?: string;
   tool_call_id?: string;
   timestamp?: number;
+  /** Model reasoning ("thinking") captured with the assistant turn, when the provider returned it. */
+  reasoning?: string | null;
+  reasoning_content?: string | null;
 }
 
 export interface SessionMessagesResponse {
