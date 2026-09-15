@@ -1,3 +1,4 @@
+import { untrustedToolPayload } from '@/components/assistant-ui/tool/fallback-model/format'
 import { isArtifactFilePath, mediaExternalUrl, resolveMediaDisplaySrc } from '@/lib/media'
 import type { SessionInfo, SessionMessage } from '@/types/hermes'
 
@@ -88,26 +89,6 @@ function parseMaybeJson(value: string): unknown {
   } catch {
     return null
   }
-}
-
-function untrustedToolPayload(value: string): null | string {
-  const trimmed = value.trim()
-  const openTag = trimmed.match(/^<untrusted_tool_result\b[^>]*>\s*/)
-
-  if (!openTag) {
-    return null
-  }
-
-  const closeIndex = trimmed.lastIndexOf('</untrusted_tool_result>')
-
-  if (closeIndex <= openTag[0].length) {
-    return null
-  }
-
-  const wrapped = trimmed.slice(openTag[0].length, closeIndex).trim()
-  const payloadStart = wrapped.indexOf('\n\n')
-
-  return (payloadStart === -1 ? wrapped : wrapped.slice(payloadStart + 2)).trim()
 }
 
 function parseToolPayloads(text: string): unknown[] {

@@ -85,6 +85,41 @@ export function prettyJson(value: unknown): string {
   return clampForDisplay(raw ?? '')
 }
 
+/**
+ * Payload inside Hermes' `<untrusted_tool_result source=…>` envelope (web_search,
+ * web_extract, browser_* — anything that fetched external content wraps its
+ * result and prefixes a "treat as DATA" paragraph). Null when `value` is not
+ * wrapped. Mirrors tools/untrusted_content.py: envelope, blank line, payload.
+ */
+export function untrustedToolPayload(value: string): null | string {
+  const trimmed = value.trim()
+  const openTag = trimmed.match(/^<untrusted_tool_result\b[^>]*>\s*/)
+
+  if (!openTag) {
+    return null
+  }
+
+  const closeIndex = trimmed.lastIndexOf('</untrusted_tool_result>')
+
+  if (closeIndex <= openTag[0].length) {
+    return null
+  }
+
+  const wrapped = trimmed.slice(openTag[0].length, closeIndex).trim()
+  const payloadStart = wrapped.indexOf('\n\n')
+
+  return (payloadStart === -1 ? wrapped : wrapped.slice(payloadStart + 2)).trim()
+}
+
+/** `value` with the untrusted envelope removed (strings only; anything else passes through). */
+export function unwrapUntrustedToolResult(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value
+  }
+
+  return untrustedToolPayload(value) ?? value
+}
+
 export function parseMaybeObject(value: unknown): Record<string, unknown> {
   if (isRecord(value)) {
     return value
@@ -95,7 +130,9 @@ export function parseMaybeObject(value: unknown): Record<string, unknown> {
   }
 
   try {
-    const parsed = JSON.parse(value)
+    // The envelope is not JSON: without this every wrapped result parsed to {}
+    // and the row had nothing to expand (no search hits, empty detail).
+    const parsed = JSON.parse(untrustedToolPayload(value) ?? value)
 
     return isRecord(parsed) ? parsed : {}
   } catch {
