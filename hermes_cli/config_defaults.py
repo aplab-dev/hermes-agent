@@ -648,10 +648,6 @@ DEFAULT_CONFIG = {
     # openrouter.ai/docs/guides/routing/routers/pareto-router
     "openrouter": {
         "response_cache": True, "response_cache_ttl": 300, "min_coding_score": 0.65,
-        # Picker allowlist: when non-empty, the OpenRouter model picker shows ONLY these ids (in this
-        # order) instead of the curated catalog. Ids still have to exist in the live /models listing
-        # and support tool calling. Empty = curated catalog (default).
-        "model_allowlist": [],
     },
     "bedrock": {  # AWS Bedrock; only used when model.provider is "bedrock".
         "region": "",  # empty = AWS_REGION env var → us-east-1
@@ -1842,6 +1838,14 @@ DEFAULT_CONFIG = {
         # Per-provider override URLs for self-hosted curation lists using the same schema, e.g.
         # providers: {openrouter: {url: https://example.com/my-curation.json}}.
         "providers": {},
+        # Provider slugs hidden from every model picker (CLI /model, Desktop, dashboard), e.g.
+        # [anthropic, opencode-free] to keep ambient/anonymous routes out of the menu.
+        "excluded_providers": [],
+        # Per-provider shortlist: when a provider has a non-empty list here, its picker row shows
+        # ONLY these model ids, in this order, instead of the curated catalog (OpenRouter ids still
+        # have to exist in the live /models listing and support tool calling). Providers not listed
+        # are untouched. e.g. allowlist: {openrouter: [deepseek/deepseek-v4-flash-0731, z-ai/glm-5.3]}
+        "allowlist": {},
     },
     # Per-model metadata overrides. Fields: context_window, supports_tools,
     # supports_vision, supports_reasoning, model_family. <provider>.<model_id> wins over

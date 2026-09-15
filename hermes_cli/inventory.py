@@ -23,6 +23,8 @@ class ConfigContext:
     user_providers: dict
     custom_providers: list
     excluded_providers: list = None
+    # ``model_catalog.allowlist``: {provider_slug: [model ids]} — applied by build_models_payload.
+    model_allowlist: dict = None
 
     def with_overrides(
         self, *, current_provider: Optional[str] = None, current_model: Optional[str] = None,
@@ -51,12 +53,15 @@ def load_picker_context() -> ConfigContext:
         current_base_url = str(model_cfg.get("base_url", "") or "")
     else:  # config.model can be a bare string in older configs
         current_model, current_provider, current_base_url = (str(model_cfg) if model_cfg else ""), "", ""
-    excluded = cfg.get("model_catalog", {}).get("excluded_providers") or []
+    catalog_cfg = cfg.get("model_catalog") if isinstance(cfg.get("model_catalog"), dict) else {}
+    excluded = catalog_cfg.get("excluded_providers") or []
+    allowlist = catalog_cfg.get("allowlist") or {}
     return ConfigContext(
         current_provider=current_provider, current_model=current_model, current_base_url=current_base_url,
         user_providers=stringify_provider_map(cfg.get("providers")),
         custom_providers=get_compatible_custom_providers(cfg),
         excluded_providers=excluded if isinstance(excluded, list) else [],
+        model_allowlist=allowlist if isinstance(allowlist, dict) else {},
     )
 
 
@@ -130,6 +135,9 @@ def build_models_payload(
     # A local proxy serving a model also in an aggregator's catalog would show under both, and picking
     # the aggregator row silently breaks the call — aggregators only list models no specific provider has.
     _strip_aggregator_overlaps(rows)
+    # Operator shortlist (``model_catalog.allowlist``): one place for every surface, so the CLI /model
+    # picker, Desktop menu and dashboard agree on what is offered.
+    _apply_model_allowlist(rows, ctx.model_allowlist)
 
     if include_unconfigured:
         rows = list(rows) + _without_slug(_append_unconfigured_rows(rows, ctx), "moa")
@@ -146,6 +154,36 @@ def build_models_payload(
     _apply_custom_aliases(rows)
 
     return {"providers": rows, "model": ctx.current_model, "provider": ctx.current_provider}
+
+
+def _apply_model_allowlist(rows: list[dict], allowlist: dict | None) -> None:
+    """Replace each listed provider's ``models`` with the operator's shortlist (order kept, ids
+    de-duplicated). Ids absent from the provider's catalog are still offered — the operator named
+    them on purpose (a freshly released model, a private alias) — while the ``max_models`` cap that
+    already trimmed the row no longer applies to an explicit list."""
+    if not isinstance(allowlist, dict) or not allowlist:
+        return
+    wanted: dict[str, list[str]] = {}
+    for slug, ids in allowlist.items():
+        if isinstance(ids, str):
+            ids = [ids]
+        if not isinstance(ids, list):
+            continue
+        clean: list[str] = []
+        for item in ids:
+            mid = str(item).strip()
+            if mid and mid not in clean:
+                clean.append(mid)
+        if clean:
+            wanted[str(slug).strip().lower()] = clean
+    if not wanted:
+        return
+    for row in rows:
+        ids = wanted.get(_slug(row))
+        if ids is None:
+            continue
+        row["models"] = list(ids)
+        row["total_models"] = len(ids)
 
 
 def _strip_aggregator_overlaps(rows: list[dict]) -> None:

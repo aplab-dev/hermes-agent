@@ -541,11 +541,11 @@ def _fetch_live_catalog_index(url: str, timeout: float, opener) -> Optional[tupl
 
 
 def _openrouter_model_allowlist() -> list[str]:
-    """``openrouter.model_allowlist`` from config.yaml as a de-duplicated list of ids (order kept)."""
+    """``model_catalog.allowlist.openrouter`` from config.yaml as a de-duplicated list of ids (order kept)."""
     try:
         from hermes_cli.config import load_config
 
-        raw = ((load_config() or {}).get("openrouter") or {}).get("model_allowlist") or []
+        raw = (((load_config() or {}).get("model_catalog") or {}).get("allowlist") or {}).get("openrouter") or []
     except Exception:
         return []
     if isinstance(raw, str):
@@ -598,7 +598,7 @@ def fetch_openrouter_models(
 
     curated: list[tuple[str, str]] = []
     silent_default = get_preferred_silent_default_model("openrouter")
-    # User allowlist (config ``openrouter.model_allowlist``): replaces the curated manifest so the
+    # User allowlist (config ``model_catalog.allowlist.openrouter``): replaces the curated manifest so the
     # picker shows exactly the operator's shortlist, still gated by the live tool-support check.
     allowlist = _openrouter_model_allowlist()
     if allowlist:
