@@ -106,15 +106,17 @@ describe('statusbar item visibility', () => {
       item('gateway-health', 'Gateway')
     ])
 
-    for (const label of ['Turn timer', 'Context meter', 'Cache hit rate', 'Tokens per second', 'Session timer']) {
+    for (const label of ['Turn timer', 'Context meter', 'Tokens per second', 'Session timer']) {
       expect(screen.queryByText(label)).toBeNull()
     }
+    // Cache hit rate ships visible: it pairs with session cost as the "is this session cheap" readout.
+    expect(within(statusbar).getByText('Cache hit rate')).toBeTruthy()
 
     openContextMenu(statusbar)
 
     for (const [id, label] of [
       ['session-timer', 'Session timer'],
-      ['cache-hit-rate', 'Cache hit rate']
+      ['tokens-per-second', 'Tokens per second']
     ]) {
       fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: label }))
 
