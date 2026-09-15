@@ -137,9 +137,10 @@ def _cmd_create(args, conn) -> int:
     if not args.folders and not primary:
         # No folder given: mint <projects.root>/<slug> (config ``projects.root``), else keep the
         # folder-less project the DB has always allowed.
-        from hermes_cli.projects_root import create_project_folder, projects_root
+        from hermes_cli.projects_root import create_project_folder, projects_root, slug_for_name
         if projects_root() is not None:
-            slug = pdb.normalize_slug(args.slug) if args.slug else pdb._slugify(args.name)
+            slug = pdb.normalize_slug(args.slug) if args.slug else slug_for_name(args.name)
+            args.slug = slug  # DB slug = folder name (transliterated for Cyrillic names)
             primary = create_project_folder(slug, args.name)
             print(f"Created folder {primary}")
     pid = pdb.create_project(

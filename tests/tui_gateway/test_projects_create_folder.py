@@ -57,3 +57,9 @@ def test_without_create_folder_nothing_is_built(projects_env: Path):
 
 def test_list_reports_root(projects_env: Path):
     assert _call("projects.list", {})["root"] == str(projects_env)
+
+
+def test_cyrillic_name_gets_transliterated_slug_and_folder(projects_env: Path):
+    proj = _call("projects.create", {"name": "Налоги 2026", "create_folder": True})["project"]
+    assert proj["slug"] == "nalogi-2026"
+    assert proj["primary_path"] == str(projects_env / "nalogi-2026")

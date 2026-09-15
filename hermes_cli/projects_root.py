@@ -18,6 +18,24 @@ _HERMES_MD_STUB = """# {name}
 """
 
 
+# Cyrillic → Latin (GOST-ish, ASCII only) so a Russian project name still yields a readable folder/slug
+# instead of the generic "project" that a strip-to-[a-z0-9] slugify produces.
+_TRANSLIT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo", "ж": "zh", "з": "z", "и": "i",
+    "й": "y", "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t",
+    "у": "u", "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "", "ы": "y",
+    "ь": "", "э": "e", "ю": "yu", "я": "ya", "і": "i", "ї": "yi", "є": "ye", "ґ": "g",
+}
+
+
+def slug_for_name(name: str) -> str:
+    """Folder/slug candidate for a human project name: transliterate Cyrillic, then the same
+    lowercase ``[a-z0-9-]`` rule as ``projects_db._slugify`` (``"Налоги 2026"`` → ``nalogi-2026``)."""
+    from hermes_cli.projects_db import _slugify
+    text = "".join(_TRANSLIT.get(ch, ch) for ch in str(name or "").lower())
+    return _slugify(text)
+
+
 def projects_root(cfg: Optional[dict] = None) -> Optional[Path]:
     """Absolute ``projects.root`` from config, or None when unset."""
     if cfg is None:

@@ -974,3 +974,15 @@ describe('tombstone pruning', () => {
     expect($removedSessionIds.get().has('sess-1')).toBe(false)
   })
 })
+
+describe('previewProjectSlug', () => {
+  it('mirrors the backend slug rule incl. Cyrillic transliteration', async () => {
+    const { previewProjectFolder, previewProjectSlug } = await import('./projects')
+
+    expect(previewProjectSlug('Налоги 2026')).toBe('nalogi-2026')
+    expect(previewProjectSlug('Taxes 2026 / done')).toBe('taxes-2026-done')
+    expect(previewProjectSlug('!!!')).toBe('project')
+    expect(previewProjectFolder('/x/Hermes/', 'Письма')).toBe('/x/Hermes/pisma')
+    expect(previewProjectFolder(null, 'Письма')).toBeNull()
+  })
+})

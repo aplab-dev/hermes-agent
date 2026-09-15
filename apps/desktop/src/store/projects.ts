@@ -346,12 +346,18 @@ function applyPayload(payload: ProjectsPayload): void {
   $projectsRoot.set(payload.root?.trim() || null)
 }
 
-// Mirror of hermes_cli/projects_db._slugify — a best-effort preview of the folder
-// the backend will mint; the backend's slug (unique-suffixed on collision) wins.
+// Mirror of hermes_cli/projects_root.slug_for_name — a best-effort preview of the
+// folder the backend will mint; the backend's slug (unique-suffixed on collision) wins.
+const CYRILLIC_TRANSLIT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'yo', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l',
+  м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh',
+  щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya', і: 'i', ї: 'yi', є: 'ye', ґ: 'g'
+}
+
 export function previewProjectSlug(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
+  const slug = [...name.trim().toLowerCase()]
+    .map(ch => CYRILLIC_TRANSLIT[ch] ?? ch)
+    .join('')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^[-_]+|[-_]+$/g, '')
     .slice(0, 64)

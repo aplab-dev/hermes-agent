@@ -100,10 +100,11 @@ def _(rid, params, pdb, conn) -> dict:
     # ``create_folder``: no folder picked → mint <projects.root>/<slug>. Folders that were picked but
     # don't exist yet are created only when they live under the root (never arbitrary trees).
     if params.get("create_folder"):
-        from hermes_cli.projects_root import create_project_folder, is_under_root, projects_root
+        from hermes_cli.projects_root import create_project_folder, is_under_root, projects_root, slug_for_name
         name = str(params.get("name") or "")
         if not folders and not primary_path:
-            slug = pdb.normalize_slug(params.get("slug")) if params.get("slug") else pdb._slugify(name)
+            slug = pdb.normalize_slug(params.get("slug")) if params.get("slug") else slug_for_name(name)
+            params = {**params, "slug": slug}  # DB slug = folder name (transliterated for Cyrillic names)
             primary_path = create_project_folder(slug, name)
             folders = [primary_path]
         else:

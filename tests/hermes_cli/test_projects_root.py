@@ -45,3 +45,11 @@ def test_is_under_root(tmp_path):
     assert pr.is_under_root(str(root), root)
     assert not pr.is_under_root(str(tmp_path / "elsewhere"), root)
     assert not pr.is_under_root(str(root) + "-other", root)
+
+
+@pytest.mark.parametrize("name,slug", [
+    ("Налоги 2026", "nalogi-2026"), ("Письма", "pisma"), ("Taxes 2026", "taxes-2026"),
+    ("Щи & борщ", "shchi-borshch"), ("", "project"), ("!!!", "project"),
+])
+def test_slug_for_name_transliterates(name, slug):
+    assert pr.slug_for_name(name) == slug
