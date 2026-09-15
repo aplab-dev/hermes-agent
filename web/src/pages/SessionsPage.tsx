@@ -31,6 +31,7 @@ import {
   Pencil,
   Check,
   Archive,
+  Activity,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatSessionPruneResult } from "@/lib/session-prune";
@@ -255,16 +256,20 @@ function ToolResultBlock({
   const { t } = useI18n();
 
   // read_file results are documents, not logs: render CSV/XLSX as tables, Markdown as Markdown.
+  let readFileDocument: string | null = null;
   if (toolName === "read_file") {
     try {
       const parsed = JSON.parse(content.trim()) as { content?: unknown; error?: unknown };
       if (typeof parsed.content === "string" && !parsed.error) {
-        const path = typeof toolArgs?.path === "string" ? toolArgs.path : undefined;
-        return <DocumentView path={path} content={parsed.content} />;
+        readFileDocument = parsed.content;
       }
     } catch {
       // fall through to the generic renderer
     }
+  }
+  if (readFileDocument !== null) {
+    const path = typeof toolArgs?.path === "string" ? toolArgs.path : undefined;
+    return <DocumentView path={path} content={readFileDocument} />;
   }
 
   let text = content;
@@ -714,6 +719,20 @@ function SessionRow({
           <Play />
         </Button>
       )}
+
+      <Button
+        ghost
+        size="icon"
+        className="text-muted-foreground hover:text-primary"
+        aria-label="LLM calls"
+        title="LLM calls — every API request of this session: prompt on the wire, thinking, output, cache, cost"
+        onClick={(e) => {
+          e.stopPropagation();
+          navigate(`/requests/${encodeURIComponent(session.id)}`);
+        }}
+      >
+        <Activity />
+      </Button>
 
       <Button
         ghost

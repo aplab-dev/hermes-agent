@@ -1,0 +1,8 @@
+name: request_log
+version: "0.1.0"
+description: "Local LLM request log: every API call with the exact prompt on the wire, thinking, output, tokens, prefix-cache hits and cost — into HERMES_HOME/requests.db, viewable in the dashboard (Sessions → LLM calls). Opt-in via `plugins.enabled: [observability/request_log]`."
+author: aplab-dev
+hooks:
+  - pre_api_request
+  - post_api_request
+  - api_request_error
