@@ -457,6 +457,10 @@ def _turn_usage_delta(before: dict, agent) -> dict | None:
         return None
     delta["cost_usd"] = round(max(delta["cost_usd"], 0.0), 6)
     delta["cost_status"] = str(getattr(agent, "session_cost_status", "") or "unknown")
+    # 1-based, session-relative index range of the API calls this turn made (request_log rows of the
+    # session in insertion order): the per-reply badge opens the LLM-calls canvas on the reply's last call.
+    delta["first_call_idx"] = before.get("calls", 0) + 1
+    delta["last_call_idx"] = after["calls"]
     prompt = delta["input"] + delta["cache_read"]
     if prompt > 0 and delta["cache_read"] > 0:
         delta["cache_hit_pct"] = max(0, min(100, round(delta["cache_read"] / prompt * 100)))

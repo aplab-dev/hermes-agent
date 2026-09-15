@@ -15,6 +15,7 @@ export const SKILLS_ROUTE = '/skills'
 export const MESSAGING_ROUTE = '/messaging'
 export const WEBHOOKS_ROUTE = '/webhooks'
 export const ARTIFACTS_ROUTE = '/artifacts'
+export const CALLS_ROUTE = '/calls'
 export const CRON_ROUTE = '/cron'
 export const PROFILES_ROUTE = '/profiles'
 export const AGENTS_ROUTE = '/agents'
@@ -24,6 +25,7 @@ export type AppView =
   | 'session-import'
   | 'agents'
   | 'artifacts'
+  | 'calls'
   | 'chat'
   | 'command-center'
   | 'cron'
@@ -43,6 +45,7 @@ export type AppRouteId =
   | 'session-import'
   | 'agents'
   | 'artifacts'
+  | 'calls'
   | 'command-center'
   | 'cron'
   | 'messaging'
@@ -68,6 +71,7 @@ export const APP_ROUTES = [
   { id: 'messaging', path: MESSAGING_ROUTE, view: 'messaging' },
   { id: 'webhooks', path: WEBHOOKS_ROUTE, view: 'webhooks' },
   { id: 'artifacts', path: ARTIFACTS_ROUTE, view: 'artifacts' },
+  { id: 'calls', path: CALLS_ROUTE, view: 'calls' },
   { id: 'cron', path: CRON_ROUTE, view: 'cron' },
   { id: 'profiles', path: PROFILES_ROUTE, view: 'profiles' },
   { id: 'agents', path: AGENTS_ROUTE, view: 'agents' },

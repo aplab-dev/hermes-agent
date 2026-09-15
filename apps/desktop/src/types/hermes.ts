@@ -658,6 +658,9 @@ export interface TurnUsage {
   cost_usd: number
   cost_status?: string
   cache_hit_pct?: number
+  /** 1-based session-relative index range of the API calls this turn made (request_log order). */
+  first_call_idx?: number
+  last_call_idx?: number
 }
 
 /** One emoji reaction on a message. One per author, iOS-Tapback style. */

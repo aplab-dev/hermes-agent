@@ -10,6 +10,7 @@ import { useStore } from '@nanostores/react'
 import { type FC, type ReactNode, useCallback, useMemo, useState } from 'react'
 import { useInRouterContext, useNavigate } from 'react-router'
 
+import { openCallsCanvas } from '@/app/calls'
 import { useSessionView } from '@/app/chat/session-view'
 import { SETTINGS_ROUTE } from '@/app/routes'
 import { ChangedFilesCard } from '@/components/assistant-ui/thread/changed-files-card'
@@ -53,7 +54,7 @@ import { notifyError } from '@/store/notifications'
 import { startManualProviderOAuth } from '@/store/onboarding'
 import { $activeGatewayProfile, normalizeProfileKey, requestFreshSession } from '@/store/profile'
 import { requestSendDiagnostics } from '@/store/send-diagnostics'
-import { $connection, $currentModel } from '@/store/session'
+import { $activeSessionId, $connection, $currentModel } from '@/store/session'
 import { $voicePlayback } from '@/store/voice-playback'
 import type { TurnUsage } from '@/types/hermes'
 
@@ -673,9 +674,21 @@ const AssistantActionBar: FC<MessageActionProps & { durationS?: number; turnUsag
             </span>
           )}
           {turnUsage && (
-            <span data-slot="aui_turn-usage" title={t.assistant.thread.turnUsageTitle}>
+            <button
+              className="cursor-pointer rounded px-0.5 hover:bg-accent hover:text-foreground"
+              data-slot="aui_turn-usage"
+              onClick={() => {
+                const sessionId = $activeSessionId.get()
+
+                if (sessionId) {
+                  openCallsCanvas(sessionId, turnUsage.last_call_idx)
+                }
+              }}
+              title={t.assistant.thread.turnUsageTitle}
+              type="button"
+            >
               {turnUsageLabel(turnUsage)}
-            </span>
+            </button>
           )}
         </span>
       )}
