@@ -46,6 +46,15 @@ def _is_rate_limitish(message: str) -> bool:
     return any(marker in (message or "").lower() for marker in _RATE_LIMIT_MARKERS)
 
 
+_DEAD_VENDOR_MARKERS = ("401", "403", "forbidden", "unauthorized")
+
+
+def _is_vendor_dead(message: str) -> bool:
+    """A free endpoint refusing us outright (401/403) is a vendor problem, never a query problem —
+    the same query succeeds at the next ring member, so it is worth the failover hop."""
+    return any(marker in (message or "").lower() for marker in _DEAD_VENDOR_MARKERS)
+
+
 def _fail_msg(vendor: str, kind: str, exc: Any, *, other_backends: bool = True) -> str:
     label, env_key, site = _VENDOR_HINTS[vendor]
     alt = " or another web backend via `hermes tools`" if other_backends else ""
@@ -354,30 +363,41 @@ def _walk_ring(name: str, kind: str, call, throttled) -> tuple:
     return order, vendor, result, True
 
 
+def _search_hits(result: Dict[str, Any]) -> list:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    hits = data.get("web")
+    return hits if isinstance(hits, list) else []
+
+
 def search_with_failover(name: str, query: str, limit: int = 5) -> Dict[str, Any]:
-    """Rate-limit-shaped errors advance to the next vendor, other errors stop the walk
-    (a malformed query fails everywhere). ``data.served_by`` is set when the serving
-    vendor differs from *name*."""
+    """Rate-limit-shaped and 401/403 errors advance to the next vendor, as does a successful
+    reply with NO hits (neural engines return nothing for some keyword queries a keyword engine
+    answers fine); other errors stop the walk (a malformed query fails everywhere).
+    ``data.served_by`` is set when the serving vendor differs from *name*."""
 
-    def _throttled(result: Dict[str, Any]) -> bool:
-        return not result.get("success") and _is_rate_limitish(result.get("error", ""))
+    def _failover(result: Dict[str, Any]) -> bool:
+        if result.get("success"):
+            return not _search_hits(result)
+        error = result.get("error", "")
+        return _is_rate_limitish(error) or _is_vendor_dead(error)
 
-    order, vendor, result, exhausted = _walk_ring(name, "search", lambda v: _KEYLESS_SEARCHERS[v](query, limit), _throttled)
+    order, vendor, result, exhausted = _walk_ring(name, "search", lambda v: _KEYLESS_SEARCHERS[v](query, limit), _failover)
     if not order:
         return search_fail(_ALL_PAID_MSG)
-    if exhausted:
-        result["error"] = f"{result.get('error', '')} (all keyless vendors throttled: {', '.join(order)})"
-    elif result.get("success") and vendor != name:
+    if exhausted and not result.get("success"):
+        result["error"] = f"{result.get('error', '')} (all keyless vendors throttled or failed: {', '.join(order)})"
+    elif vendor != name:
         result.setdefault("data", {})["served_by"] = vendor
     return result
 
 
 def extract_with_failover(name: str, urls: List[str]) -> List[Dict[str, Any]]:
-    """Fails over only when EVERY url in a batch is rate-limit-shaped (partial failures
-    are page problems, returned as-is)."""
+    """Fails over only when EVERY url in a batch is rate-limit-shaped or 401/403 (partial
+    failures are page problems, returned as-is)."""
 
     def _all_throttled(results: List[Dict[str, Any]]) -> bool:
-        return bool(results) and all(r.get("error", "") and _is_rate_limitish(r.get("error", "")) for r in results)
+        return bool(results) and all(
+            r.get("error", "") and (_is_rate_limitish(r["error"]) or _is_vendor_dead(r["error"])) for r in results)
 
     order, _vendor, results, _exhausted = _walk_ring(name, "extract", lambda v: _KEYLESS_EXTRACTORS[v](list(urls)), _all_throttled)
     if not order:
