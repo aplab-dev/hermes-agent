@@ -2970,10 +2970,12 @@ export interface Translations {
       toggleSessionTimer: string
       toggleTerminal: string
       toggleTokensPerSecond: string
+      toggleSessionCost: string
       toggleVersion: string
       toggleFreeTier: string
       toggleWorkspace: string
       cacheHitRateTitle: string
+      sessionCostTitle: string
       tokensPerSecondTitle: string
       agents: string
       closeAgents: string

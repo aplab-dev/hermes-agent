@@ -821,7 +821,10 @@ export interface UsageStats {
   context_estimated?: boolean
   context_source?: string
   context_used?: number
+  /** Estimated session spend in USD (tui_gateway `_get_usage`). Omitted when the route has no pricing. */
   cost_usd?: number
+  /** `estimated` | `actual` | `included` — how `cost_usd` was derived. */
+  cost_status?: string
   input: number
   output: number
   total: number

@@ -1945,6 +1945,16 @@ def _get_usage(agent) -> dict:
             for _key, _val in (("avg_latency_s", _total_lat / _n), ("avg_tps", _avg_vel)):
                 if _val is not None and _val == _val and 0 < _val < 1e6:  # guard NaN/negative/absurd provider timings
                     usage[_key] = round(float(_val), 1)
+    # Session spend (CLI `display.show_cost` parity): the agent already accumulates
+    # session_estimated_cost_usd per API call (agent/turn_usage.py); forward it so the
+    # Desktop status bar can show $ without another RPC. Omitted while nothing is known
+    # (local/keyless routes report status "unknown" and 0.0).
+    with contextlib.suppress(Exception):
+        _cost_status = str(getattr(agent, "session_cost_status", "") or "")
+        _cost = float(getattr(agent, "session_estimated_cost_usd", 0.0) or 0.0)
+        if _cost_status in ("estimated", "actual", "included") or _cost > 0:
+            usage["cost_usd"] = round(_cost, 6)
+            usage["cost_status"] = _cost_status
     # Live count of background/async subagents (CLI status bar ⛓ parity, same async_delegation registry).
     with contextlib.suppress(Exception):
         from tools.async_delegation import active_count as _async_active_count

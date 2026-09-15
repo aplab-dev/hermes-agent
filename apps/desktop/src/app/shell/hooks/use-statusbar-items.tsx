@@ -18,6 +18,7 @@ import { displayPath, pathLeaf } from '@/lib/display-path'
 import {
   Activity,
   AlertCircle,
+  CircleDollarSign,
   Clock,
   Command,
   FolderOpen,
@@ -29,7 +30,7 @@ import {
   Zap
 } from '@/lib/icons'
 import { runtimeReadinessDisplay, type RuntimeReadinessResult } from '@/lib/runtime-readiness'
-import { cacheHitLabel, contextBarLabel, LiveDuration, tokensPerSecondLabel, usageContextLabel } from '@/lib/statusbar'
+import { cacheHitLabel, contextBarLabel, LiveDuration, sessionCostLabel, tokensPerSecondLabel, usageContextLabel } from '@/lib/statusbar'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { resolveVersionStatus } from '@/lib/version-status'
@@ -292,6 +293,7 @@ export function useStatusbarItems({
   // ticks mid-turn, message.complete after) — no extra RPC, no polling.
   const cacheHit = cacheHitLabel(currentUsage)
   const tokensPerSecond = tokensPerSecondLabel(currentUsage)
+  const sessionCost = sessionCostLabel(currentUsage)
 
   const approvalModeItem = useApprovalModeStatusbarItem(activeGatewayProfile, requestGateway)
   const systemResourcesItem = useSystemResourcesStatusbarItem()
@@ -618,6 +620,16 @@ export function useStatusbarItems({
         variant: 'text'
       },
       {
+        icon: <CircleDollarSign className="size-3" />,
+        id: 'session-cost',
+        // Visible by default (unlike the other per-turn readouts): spend is the
+        // one session number a paying user wants to see without opting in.
+        label: sessionCost || '—',
+        title: copy.sessionCostTitle,
+        toggleLabel: copy.toggleSessionCost,
+        variant: 'text'
+      },
+      {
         icon: <Zap className="size-3" />,
         id: 'tokens-per-second',
         label: tokensPerSecond || '—',
@@ -658,6 +670,7 @@ export function useStatusbarItems({
       backendVersionItem,
       busy,
       cacheHit,
+      sessionCost,
       chatOpen,
       clientVersionItem,
       contextBar,

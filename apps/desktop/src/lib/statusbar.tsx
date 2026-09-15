@@ -68,6 +68,22 @@ export function cacheHitLabel(usage: UsageStats): string {
   return typeof pct === 'number' && Number.isFinite(pct) ? `${Math.round(pct)}%` : ''
 }
 
+/** `$0.0123` for the estimated session spend, `$0` for included routes; '' when the
+ *  backend omitted it (no pricing for the route, e.g. a local keyless server). */
+export function sessionCostLabel(usage: UsageStats): string {
+  const cost = usage.cost_usd
+
+  if (typeof cost !== 'number' || !Number.isFinite(cost)) {
+    return ''
+  }
+
+  if (cost === 0) {
+    return usage.cost_status === 'included' ? '$0' : '$0.00'
+  }
+
+  return cost < 0.01 ? `$${cost.toFixed(4)}` : cost < 1 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`
+}
+
 /** `42 t/s` for the rolling throughput; '' before the first completed call. */
 export function tokensPerSecondLabel(usage: UsageStats): string {
   const tps = usage.avg_tps
