@@ -540,6 +540,24 @@ def _fetch_live_catalog_index(url: str, timeout: float, opener) -> Optional[tupl
     return live_items, live_by_id
 
 
+def _openrouter_model_allowlist() -> list[str]:
+    """``openrouter.model_allowlist`` from config.yaml as a de-duplicated list of ids (order kept)."""
+    try:
+        from hermes_cli.config import load_config
+
+        raw = ((load_config() or {}).get("openrouter") or {}).get("model_allowlist") or []
+    except Exception:
+        return []
+    if isinstance(raw, str):
+        raw = [raw]
+    out: list[str] = []
+    for item in raw if isinstance(raw, list) else []:
+        mid = str(item).strip()
+        if mid and mid not in out:
+            out.append(mid)
+    return out
+
+
 def fetch_openrouter_models(
     timeout: float = 8.0, *, force_refresh: bool = False) -> list[tuple[str, str]]:
     """Return the curated OpenRouter picker list, refreshed from the live catalog when possible."""
@@ -578,6 +596,11 @@ def fetch_openrouter_models(
 
     curated: list[tuple[str, str]] = []
     silent_default = get_preferred_silent_default_model("openrouter")
+    # User allowlist (config ``openrouter.model_allowlist``): replaces the curated manifest so the
+    # picker shows exactly the operator's shortlist, still gated by the live tool-support check.
+    allowlist = _openrouter_model_allowlist()
+    if allowlist:
+        fallback = [(mid, "") for mid in allowlist]
     for preferred_id, _ in fallback:
         live_item = live_by_id.get(preferred_id)
         # Hide models without tool-calling support — selecting one fails at the first tool call.

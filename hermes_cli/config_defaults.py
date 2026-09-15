@@ -646,7 +646,13 @@ DEFAULT_CONFIG = {
     # pareto-code router knob, applied only when model.model is "openrouter/pareto-code"; higher =
     # stronger/pricier coders, 0.65 = mid-tier, "" = let OpenRouter pick the strongest. Docs:
     # openrouter.ai/docs/guides/routing/routers/pareto-router
-    "openrouter": {"response_cache": True, "response_cache_ttl": 300, "min_coding_score": 0.65},
+    "openrouter": {
+        "response_cache": True, "response_cache_ttl": 300, "min_coding_score": 0.65,
+        # Picker allowlist: when non-empty, the OpenRouter model picker shows ONLY these ids (in this
+        # order) instead of the curated catalog. Ids still have to exist in the live /models listing
+        # and support tool calling. Empty = curated catalog (default).
+        "model_allowlist": [],
+    },
     "bedrock": {  # AWS Bedrock; only used when model.provider is "bedrock".
         "region": "",  # empty = AWS_REGION env var → us-east-1
         "discovery": {
