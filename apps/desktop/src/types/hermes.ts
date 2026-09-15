@@ -1110,6 +1110,9 @@ export interface ProjectInfo {
 export interface ProjectsPayload {
   projects: ProjectInfo[]
   active_id: null | string
+  /** Config `projects.root`: folder that gets one sub-folder per project created without a
+   *  picked folder (`projects.create` with `create_folder`). Absent/null when unset. */
+  root?: null | string
 }
 
 export interface ProfileSoul {

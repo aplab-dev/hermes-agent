@@ -40,6 +40,9 @@ import type { ProjectInfo, ProjectsPayload } from '@/types/hermes'
 // membership; these atoms are the renderer's cached view.
 
 export const $projects = atom<ProjectInfo[]>([])
+// Config `projects.root` as reported by projects.list — the "New project" dialog
+// offers "<root>/<slug> will be created" when no folder is picked. null = unset.
+export const $projectsRoot = atom<null | string>(null)
 export const $activeProjectId = atom<null | string>(null)
 
 // The authoritative project -> repo -> lane tree (overview), served by
@@ -340,6 +343,29 @@ async function activeProjectsContext(profile = projectProfile()): Promise<Active
 function applyPayload(payload: ProjectsPayload): void {
   $projects.set(payload.projects ?? [])
   $activeProjectId.set(payload.active_id ?? null)
+  $projectsRoot.set(payload.root?.trim() || null)
+}
+
+// Mirror of hermes_cli/projects_db._slugify — a best-effort preview of the folder
+// the backend will mint; the backend's slug (unique-suffixed on collision) wins.
+export function previewProjectSlug(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 64)
+    .replace(/^[-_]+|[-_]+$/g, '')
+
+  return slug || 'project'
+}
+
+export function previewProjectFolder(root: null | string, name: string): null | string {
+  if (!root) {
+    return null
+  }
+
+  return `${root.replace(/[/\\]+$/, '')}/${previewProjectSlug(name)}`
 }
 
 let projectsRefreshGeneration = 0
@@ -770,6 +796,9 @@ export interface CreateProjectInput {
   color?: string
   boardSlug?: string
   use?: boolean
+  /** No folder picked: let the backend mint `<projects.root>/<slug>` (and create any picked
+   *  folder that lives under the root but doesn't exist yet). */
+  createFolder?: boolean
   // Free-text project idea; written to IDEA.md at the primary folder on create.
   idea?: string
   /** Where a "New project" DRAG dropped the project (tab-strip slot / pane
@@ -895,7 +924,8 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectI
           icon: input.icon,
           color: input.color,
           board_slug: input.boardSlug,
-          use: input.use ?? false
+          use: input.use ?? false,
+          create_folder: input.createFolder ?? false
         },
         context.profile
       )

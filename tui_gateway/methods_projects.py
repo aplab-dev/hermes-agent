@@ -19,9 +19,14 @@ class _NoProject(Exception):
 
 def _projects_payload(conn) -> dict:
     from hermes_cli import projects_db as pdb
+    from hermes_cli.projects_root import projects_root
+    root = projects_root()
     return {
         "projects": [p.to_dict() for p in pdb.list_projects(conn, include_archived=True)],
-        "active_id": pdb.get_active_id(conn)}
+        "active_id": pdb.get_active_id(conn),
+        # ``projects.root`` (config): the Desktop dialog offers "<root>/<slug> will be created" when no
+        # folder is picked. None when unset.
+        "root": str(root) if root else None}
 
 
 def _projects_method(name: str):
@@ -90,9 +95,25 @@ def _(rid, params, pdb, conn) -> dict:
 
 @_projects_method("projects.create")
 def _(rid, params, pdb, conn) -> dict:
+    folders = list(params.get("folders") or [])
+    primary_path = params.get("primary_path")
+    # ``create_folder``: no folder picked → mint <projects.root>/<slug>. Folders that were picked but
+    # don't exist yet are created only when they live under the root (never arbitrary trees).
+    if params.get("create_folder"):
+        from hermes_cli.projects_root import create_project_folder, is_under_root, projects_root
+        name = str(params.get("name") or "")
+        if not folders and not primary_path:
+            slug = pdb.normalize_slug(params.get("slug")) if params.get("slug") else pdb._slugify(name)
+            primary_path = create_project_folder(slug, name)
+            folders = [primary_path]
+        else:
+            root = projects_root()
+            for folder in [*folders, *([primary_path] if primary_path else [])]:
+                if folder and not os.path.isdir(folder) and is_under_root(folder, root):
+                    create_project_folder(os.path.basename(folder.rstrip("/\\")), name, root)
     pid = pdb.create_project(
-        conn, name=str(params.get("name") or ""), folders=params.get("folders") or [],
-        **_pick(params, "slug", "primary_path", "description", "icon", "color", "board_slug"))
+        conn, name=str(params.get("name") or ""), folders=folders, primary_path=primary_path,
+        **_pick(params, "slug", "description", "icon", "color", "board_slug"))
     if params.get("use"):
         pdb.set_active(conn, pid)
     proj = pdb.get_project(conn, pid)

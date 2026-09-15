@@ -2291,6 +2291,12 @@ DEFAULT_CONFIG = {
         # (`*.foo.com`) supported.
         "extra_allowed_hosts": [],
     },
+    "projects": {
+        # Folder that holds one sub-folder per project. When set, a project created without a folder
+        # (Desktop "New project" with nothing picked, `hermes project create NAME`) gets <root>/<slug>
+        # created and seeded with a .hermes.md stub. Empty = projects need an explicit folder.
+        "root": "",
+    },
     "desktop": {  # Hermes Desktop (Electron) launch options; only affect `hermes desktop`.
         # Git repo discovery for the Projects sidebar; empty roots = bounded scan of $HOME.
         "repo_scan_enabled": True,

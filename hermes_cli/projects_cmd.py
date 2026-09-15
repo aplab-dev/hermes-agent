@@ -24,7 +24,8 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     sub = parser.add_subparsers(dest="project_action")
     p_create = sub.add_parser("create", help="Create a new project")
     p_create.add_argument("name", help="Human name, e.g. 'Hermes Agent'")
-    p_create.add_argument("folders", nargs="*", help="Folder paths to include (first = primary)")
+    p_create.add_argument("folders", nargs="*",
+                          help="Folder paths to include (first = primary); omit to create <projects.root>/<slug>")
     p_create.add_argument("--slug", default=None, help="Explicit slug override")
     p_create.add_argument("--primary", default=None, metavar="PATH", help="Primary repo path")
     for opt in ("--description", "--icon", "--color"):
@@ -132,8 +133,17 @@ def _print_project(proj) -> None:
 
 @_db_command
 def _cmd_create(args, conn) -> int:
+    primary = args.primary
+    if not args.folders and not primary:
+        # No folder given: mint <projects.root>/<slug> (config ``projects.root``), else keep the
+        # folder-less project the DB has always allowed.
+        from hermes_cli.projects_root import create_project_folder, projects_root
+        if projects_root() is not None:
+            slug = pdb.normalize_slug(args.slug) if args.slug else pdb._slugify(args.name)
+            primary = create_project_folder(slug, args.name)
+            print(f"Created folder {primary}")
     pid = pdb.create_project(
-        conn, name=args.name, slug=args.slug, folders=args.folders, primary_path=args.primary,
+        conn, name=args.name, slug=args.slug, folders=args.folders, primary_path=primary,
         description=args.description, icon=args.icon, color=args.color, board_slug=args.board,
     )
     if args.use:

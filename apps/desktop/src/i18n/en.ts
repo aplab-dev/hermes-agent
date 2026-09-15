@@ -2587,6 +2587,7 @@ export const en: Translations = {
       ideaGenerate: 'Generate idea',
       ideaGenerating: 'Generating…',
       ideaShuffle: 'Shuffle templates',
+      willBeCreated: 'will be created',
       noFolders: 'No folders added yet.',
       addFolder: 'Add folder',
       primaryBadge: 'primary',

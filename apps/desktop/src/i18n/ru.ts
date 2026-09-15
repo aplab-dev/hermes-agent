@@ -2479,6 +2479,7 @@ export const ru = defineLocale({
       ideaGenerate: 'Сгенерировать идею',
       ideaGenerating: 'Генерация…',
       ideaShuffle: 'Перемешать шаблоны',
+      willBeCreated: 'будет создана',
       noFolders: 'Папки ещё не добавлены.',
       addFolder: 'Добавить папку',
       primaryBadge: 'основная',

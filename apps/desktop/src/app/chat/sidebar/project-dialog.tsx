@@ -23,12 +23,14 @@ import { notifyError } from '@/store/notifications'
 import {
   $newProjectDropPlacement,
   $projectDialog,
+  $projectsRoot,
   addProjectFolder,
   clearNewProjectDropPlacement,
   closeProjectDialog,
   createProject,
   generateProjectIdea,
   pickProjectFolder,
+  previewProjectFolder,
   renameProject
 } from '@/store/projects'
 
@@ -39,6 +41,7 @@ export function ProjectDialog() {
   const { t } = useI18n()
   const p = t.sidebar.projects
   const state = useStore($projectDialog)
+  const projectsRoot = useStore($projectsRoot)
   const open = state !== null
   const mode = state?.mode ?? 'create'
 
@@ -145,13 +148,22 @@ export function ProjectDialog() {
     }
 
     // A project owns sessions by folder (cwd-prefix), so creation requires at
-    // least one — a folder-less project couldn't hold a session anyway.
-    if (mode === 'create' && trimmed && folders.length) {
+    // least one — a folder-less project couldn't hold a session anyway. With a
+    // configured projects root, "no folder picked" means "mint <root>/<slug>".
+    if (mode === 'create' && trimmed && (folders.length || projectsRoot)) {
       // The arm is consumed exactly on SUCCESS (before the close): a failed
       // create leaves the dialog open for a retry that still lands where it
       // was dropped; the open-state effect discards it on cancel/teardown.
       await runSubmit(
-        () => createProject({ dropPlacement, folders, idea: idea.trim() || undefined, name: trimmed, use: true }),
+        () =>
+          createProject({
+            createFolder: Boolean(projectsRoot),
+            dropPlacement,
+            folders,
+            idea: idea.trim() || undefined,
+            name: trimmed,
+            use: true
+          }),
         clearNewProjectDropPlacement
       )
     }
@@ -176,6 +188,8 @@ export function ProjectDialog() {
   }
 
   const title = mode === 'rename' ? p.renameTitle : mode === 'add-folder' ? p.addFolderTitle : p.createTitle
+  // Folder the backend will mint when none is picked (config `projects.root`).
+  const autoFolder = mode === 'create' && folders.length === 0 ? previewProjectFolder(projectsRoot, name) : null
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -208,7 +222,20 @@ export function ProjectDialog() {
           <div className="flex flex-col gap-1.5">
             <span className="text-[0.6875rem] font-medium text-(--ui-text-tertiary)">{p.foldersLabel}</span>
             {folders.length === 0 ? (
-              <span className="text-[0.75rem] text-(--ui-text-quaternary)">{p.noFolders}</span>
+              autoFolder ? (
+                <span
+                  className="flex items-center gap-2 rounded-md bg-(--ui-control-hover-background) px-2 py-1 text-[0.75rem]"
+                  title={autoFolder}
+                >
+                  <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="new-folder" size="0.75rem" />
+                  <span className="min-w-0 flex-1 truncate">{autoFolder}</span>
+                  <span className="shrink-0 text-[0.625rem] uppercase text-(--ui-text-quaternary)">
+                    {p.willBeCreated}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-[0.75rem] text-(--ui-text-quaternary)">{p.noFolders}</span>
+              )
             ) : (
               <ul className="flex flex-col gap-1">
                 {folders.map((folder, index) => (
@@ -320,7 +347,7 @@ export function ProjectDialog() {
               {t.common.cancel}
             </Button>
             <Button
-              disabled={submitting || !name.trim() || (mode === 'create' && folders.length === 0)}
+              disabled={submitting || !name.trim() || (mode === 'create' && folders.length === 0 && !autoFolder)}
               onClick={() => void submit()}
               type="button"
             >

@@ -2742,6 +2742,7 @@ export const zh: Translations = {
       ideaGenerate: '生成想法',
       ideaGenerating: '生成中…',
       ideaShuffle: '随机模板',
+      willBeCreated: '将被创建',
       noFolders: '尚未添加文件夹。',
       addFolder: '添加文件夹',
       primaryBadge: '主',

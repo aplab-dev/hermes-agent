@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type * as Nanostores from 'nanostores'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProjectDialog } from './project-dialog'
 
@@ -26,7 +26,8 @@ vi.mock('@/i18n', () => ({
           namePlaceholder: 'Project name',
           noFolders: 'No folders yet',
           primaryBadge: 'Primary',
-          removeFolder: 'Remove folder'
+          removeFolder: 'Remove folder',
+          willBeCreated: 'will be created'
         }
       }
     }
@@ -38,7 +39,7 @@ vi.mock('@/i18n', () => ({
 // store (backend calls, project list, etc.) which is irrelevant to the Tip fix.
 // vi.mock factories are hoisted above the rest of the file, so the atom must
 // be created inside vi.hoisted to exist by the time the factory runs.
-const { $newProjectDropPlacement, $projectDialog } = vi.hoisted(() => {
+const { $newProjectDropPlacement, $projectDialog, $projectsRoot } = vi.hoisted(() => {
   const { atom } = require('nanostores') as typeof Nanostores
 
   return {
@@ -46,19 +47,24 @@ const { $newProjectDropPlacement, $projectDialog } = vi.hoisted(() => {
     $newProjectDropPlacement: atom<{ anchor: string; before?: null | string; dir: string } | null>(null),
     $projectDialog: atom<{ mode: 'create' | 'rename' | 'add-folder'; name?: string; projectId?: string } | null>({
       mode: 'create'
-    })
+    }),
+    // Config `projects.root` (null = unset: creation needs a picked folder).
+    $projectsRoot: atom<null | string>(null)
   }
 })
 
 vi.mock('@/store/projects', () => ({
   $newProjectDropPlacement,
   $projectDialog,
+  $projectsRoot,
   addProjectFolder: vi.fn(),
   clearNewProjectDropPlacement: vi.fn(),
   closeProjectDialog: vi.fn(),
   createProject: vi.fn(),
   generateProjectIdea: vi.fn(),
   pickProjectFolder: vi.fn(async () => '/Users/test/my-folder'),
+  previewProjectFolder: (root: null | string, name: string) =>
+    root ? `${root}/${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'project'}` : null,
   renameProject: vi.fn()
 }))
 
@@ -155,5 +161,43 @@ describe('ProjectDialog', () => {
     await waitFor(() => expect(createProject).toHaveBeenCalledOnce())
 
     expect(createProject.mock.calls[0]?.[0]).toMatchObject({ dropPlacement: undefined })
+  })
+})
+
+describe('ProjectDialog with a configured projects root', () => {
+  beforeEach(() => {
+    $projectsRoot.set('/Users/test/Documents/Hermes')
+    $projectDialog.set({ mode: 'create' })
+  })
+
+  afterEach(() => {
+    $projectsRoot.set(null)
+  })
+
+  it('previews <root>/<slug> and lets Create proceed with no folder picked', async () => {
+    const { createProject } = vi.mocked(await import('@/store/projects'))
+    vi.mocked(createProject).mockClear()
+    render(<ProjectDialog />)
+
+    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'Taxes 2026' } })
+    expect(screen.getByText('/Users/test/Documents/Hermes/taxes-2026')).toBeTruthy()
+    expect(screen.getByText('will be created')).toBeTruthy()
+
+    const create = screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement
+    await waitFor(() => expect(create.disabled).toBe(false))
+    fireEvent.click(create)
+
+    await waitFor(() => expect(createProject).toHaveBeenCalledOnce())
+    expect(createProject.mock.calls[0]?.[0]).toMatchObject({ createFolder: true, folders: [], name: 'Taxes 2026' })
+  })
+
+  it('drops the preview once a folder is picked', async () => {
+    render(<ProjectDialog />)
+
+    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'Taxes 2026' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add folder' }))
+    await screen.findByText('/Users/test/my-folder')
+
+    expect(screen.queryByText('/Users/test/Documents/Hermes/taxes-2026')).toBeNull()
   })
 })
