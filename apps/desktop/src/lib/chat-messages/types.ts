@@ -2,7 +2,7 @@ import type { ThreadMessageLike } from '@assistant-ui/react'
 import { type BillingBlock } from '@hermes/shared'
 
 import type { ErrorSurface } from '@/lib/error-surface'
-import type { MessageReaction, SessionMessage, UsageStats } from '@/types/hermes'
+import type { MessageReaction, SessionMessage, TurnUsage, UsageStats } from '@/types/hermes'
 
 export interface TimelinePartMetadata {
   /** Unix seconds when this visible activity segment began. Fractional values
@@ -38,6 +38,9 @@ export type ChatMessage = {
    *  stamped by the desktop when it watched the turn run. Absent for
    *  messages hydrated from history — the backend doesn't persist it. */
   durationS?: number
+  /** This reply's own token/cost delta (message.complete `turn_usage`, or
+   *  display_metadata.turn_usage when hydrated from history). */
+  turnUsage?: TurnUsage
   /** Composer attachment ref strings (`@file:...`, `@image:...`) sent with this user message. */
   attachmentRefs?: string[]
   /** Durable backend `messages.id`. Absent until the row is persisted. */
@@ -178,6 +181,8 @@ export type GatewayEventPayload = {
   // message.complete — signals the final text was already previewed via
   // interim_assistant_callback, so the UI can settle instead of duplicating.
   response_previewed?: boolean
+  // message.complete — this turn's own token/cost delta (newer gateways).
+  turn_usage?: TurnUsage
   // message.complete with status "error" — `text` is streamed partial output
   // (keep it visible), not the error string.
   partial?: boolean

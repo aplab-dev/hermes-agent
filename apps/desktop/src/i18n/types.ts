@@ -3259,6 +3259,7 @@ export interface Translations {
       thought: string
       thoughtBriefly: string
       thoughtFor: (duration: string) => string
+      turnUsageTitle: string
       turnDuration: (duration: string) => string
       today: (time: string) => string
       yesterday: (time: string) => string

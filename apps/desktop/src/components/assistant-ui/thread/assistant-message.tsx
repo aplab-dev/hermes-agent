@@ -31,6 +31,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { CopyButton } from '@/components/ui/copy-button'
 import { useI18n } from '@/i18n'
 import { type ErrorSurface, formatErrorDiagnostics, isOAuthReauthSurface } from '@/lib/error-surface'
+import { compactNumber } from '@/lib/format'
 import { triggerHaptic } from '@/lib/haptics'
 import {
   AudioLines,
@@ -54,6 +55,7 @@ import { $activeGatewayProfile, normalizeProfileKey, requestFreshSession } from 
 import { requestSendDiagnostics } from '@/store/send-diagnostics'
 import { $connection, $currentModel } from '@/store/session'
 import { $voicePlayback } from '@/store/voice-playback'
+import type { TurnUsage } from '@/types/hermes'
 
 // Stable empty identity for the settled-parts selector — a fresh [] per render
 // would re-derive the changed-files card on every message re-render.
@@ -197,6 +199,8 @@ const AssistantMessageBody: FC<AssistantMessageProps & { collapsedNotice?: null 
   // Whole-turn wall-clock seconds (set once at completion — referentially
   // stable across the 30 Hz delta stream, so this adds no per-token renders).
   const turnDurationS = useAuiState(s => s.message.metadata?.custom?.durationS as number | undefined)
+  // This reply's own spend (message.complete `turn_usage` / display_metadata.turn_usage).
+  const turnUsage = useAuiState(s => s.message.metadata?.custom?.turnUsage as TurnUsage | undefined)
 
   const getMessageText = useCallback(() => messageContentText(messageRuntime.getState().content), [messageRuntime])
 
@@ -271,6 +275,7 @@ const AssistantMessageBody: FC<AssistantMessageProps & { collapsedNotice?: null 
               getMessageText={getMessageText}
               messageId={messageId}
               onBranchInNewChat={onBranchInNewChat}
+              turnUsage={turnUsage}
             />
           )}
           {/* Last thing in the turn — under the action bar, the way Cursor ends a
@@ -628,8 +633,18 @@ const ErrorRecoveryActions: FC = () => {
   )
 }
 
-const AssistantActionBar: FC<MessageActionProps & { durationS?: number }> = ({
+/** `3 calls · 22.7k in (81% cached) · 1.2k out · $0.0019` — the reply's own price tag. */
+function turnUsageLabel(u: TurnUsage): string {
+  const prompt = u.input + u.cache_read
+  const cached = u.cache_hit_pct !== undefined ? ` (${u.cache_hit_pct}% cached)` : ''
+  const cost = u.cost_usd === 0 ? '$0' : u.cost_usd < 0.01 ? `$${u.cost_usd.toFixed(4)}` : `$${u.cost_usd.toFixed(3)}`
+
+  return `${u.calls}× · ${compactNumber(prompt)}↑${cached} · ${compactNumber(u.output)}↓ · ${cost}`
+}
+
+const AssistantActionBar: FC<MessageActionProps & { durationS?: number; turnUsage?: TurnUsage }> = ({
   durationS,
+  turnUsage,
   messageId,
   getMessageText,
   onBranchInNewChat
@@ -650,13 +665,18 @@ const AssistantActionBar: FC<MessageActionProps & { durationS?: number }> = ({
 
   return (
     <div className="relative flex w-full shrink-0 items-center justify-end gap-1.5">
-      {durationS !== undefined && (
-        <span
-          className="mr-auto select-none px-0.5 text-[0.6875rem] leading-5 tabular-nums text-muted-foreground"
-          data-slot="aui_turn-duration"
-          title={t.assistant.thread.turnDuration(formatElapsed(durationS))}
-        >
-          ⏱ {formatElapsed(durationS)}
+      {(durationS !== undefined || turnUsage) && (
+        <span className="mr-auto flex select-none items-center gap-2 px-0.5 text-[0.6875rem] leading-5 tabular-nums text-muted-foreground">
+          {durationS !== undefined && (
+            <span data-slot="aui_turn-duration" title={t.assistant.thread.turnDuration(formatElapsed(durationS))}>
+              ⏱ {formatElapsed(durationS)}
+            </span>
+          )}
+          {turnUsage && (
+            <span data-slot="aui_turn-usage" title={t.assistant.thread.turnUsageTitle}>
+              {turnUsageLabel(turnUsage)}
+            </span>
+          )}
         </span>
       )}
       <ActionBarPrimitive.Root
@@ -776,7 +796,11 @@ const ReadAloudButton: FC<{ getText: () => string; messageId: string }> = ({ get
   )
 }
 
-const AssistantFooter: FC<MessageActionProps & { durationS?: number }> = ({ durationS, ...props }) => {
+const AssistantFooter: FC<MessageActionProps & { durationS?: number; turnUsage?: TurnUsage }> = ({
+  durationS,
+  turnUsage,
+  ...props
+}) => {
   return (
     <div className="flex min-h-6 flex-col items-end gap-1 pr-(--message-text-indent) pl-(--message-text-indent)">
       <BranchPickerPrimitive.Root
@@ -793,7 +817,7 @@ const AssistantFooter: FC<MessageActionProps & { durationS?: number }> = ({ dura
           <Codicon name="chevron-right" size="0.875rem" />
         </BranchPickerPrimitive.Next>
       </BranchPickerPrimitive.Root>
-      <AssistantActionBar durationS={durationS} {...props} />
+      <AssistantActionBar durationS={durationS} turnUsage={turnUsage} {...props} />
     </div>
   )
 }

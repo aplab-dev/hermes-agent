@@ -3736,6 +3736,7 @@ export const en: Translations = {
       thought: 'Thought',
       thoughtBriefly: 'Thought briefly',
       thoughtFor: duration => `Thought for ${duration}`,
+      turnUsageTitle: 'This reply: API calls · prompt tokens (share served from cache) · output tokens · estimated cost',
       turnDuration: duration => `This turn took ${duration}`,
       today: time => `Today, ${time}`,
       yesterday: time => `Yesterday, ${time}`,

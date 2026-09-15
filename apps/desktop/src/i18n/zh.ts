@@ -3870,6 +3870,7 @@ export const zh: Translations = {
       thought: '已思考',
       thoughtBriefly: '思考了片刻',
       thoughtFor: duration => `思考了 ${duration}`,
+      turnUsageTitle: '本次回复：API 调用次数 · 提示 token（缓存命中占比）· 输出 token · 预估费用',
       turnDuration: duration => `本轮耗时 ${duration}`,
       today: time => `今天，${time}`,
       yesterday: time => `昨天，${time}`,

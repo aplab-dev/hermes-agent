@@ -29,6 +29,7 @@ import { isDiskFullErrorMessage, notifyError } from '@/store/notifications'
 import { broadcastSessionsChanged } from '@/store/session-sync'
 import { upsertSubagent } from '@/store/subagents'
 import { $todosBySession, setSessionTodos } from '@/store/todos'
+import type { TurnUsage } from '@/types/hermes'
 
 import type { ClientSessionState } from '../../../types'
 
@@ -563,7 +564,8 @@ export function useMessageStream({
       text: string,
       responsePreviewed?: boolean,
       failure?: { error: string; partial: boolean; surface?: ErrorSurface | null },
-      occurredAt = Date.now() / 1000
+      occurredAt = Date.now() / 1000,
+      turnUsage?: TurnUsage
     ) => {
       let shouldHydrate = false
 
@@ -618,6 +620,7 @@ export function useMessageStream({
             pending: false,
             interim: false,
             ...(durationS !== undefined ? { durationS } : {}),
+            ...(turnUsage ? { turnUsage } : {}),
             ...(completionError && failure?.surface ? { errorSurface: failure.surface } : {})
           }
 
@@ -643,6 +646,7 @@ export function useMessageStream({
           completedAt: occurredAt,
           branchGroupId: state.pendingBranchGroup ?? undefined,
           ...(durationS !== undefined ? { durationS } : {}),
+          ...(turnUsage ? { turnUsage } : {}),
           ...(completionError && { error: completionError }),
           ...(completionError && failure?.surface ? { errorSurface: failure.surface } : {})
         })

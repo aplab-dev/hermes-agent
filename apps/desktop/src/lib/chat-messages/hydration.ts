@@ -2,7 +2,7 @@ import { skillInvocationText } from '@hermes/shared'
 
 import { extractImageRefs } from '@/lib/embedded-images'
 import { dedupeGeneratedImageEchoesInParts } from '@/lib/generated-images'
-import type { MessageReaction, SessionMessage } from '@/types/hermes'
+import type { MessageReaction, SessionMessage, TurnUsage } from '@/types/hermes'
 
 import { assistantTextPart, chatMessageText, dedupeRepeatedTextInParts, reasoningPart, textPart } from './parts'
 import {
@@ -145,6 +145,18 @@ function timelineTaskCount(metadata: SessionMessage['display_metadata']): number
   const count = parseDisplayMetadata(metadata)?.task_count
 
   return typeof count === 'number' ? count : undefined
+}
+
+function messageTurnUsage(metadata: SessionMessage['display_metadata']): TurnUsage | undefined {
+  const usage = parseDisplayMetadata(metadata)?.turn_usage
+
+  if (!usage || typeof usage !== 'object') {
+    return undefined
+  }
+
+  const u = usage as Record<string, unknown>
+
+  return typeof u.cost_usd === 'number' && typeof u.calls === 'number' ? (usage as TurnUsage) : undefined
 }
 
 function messageReactions(metadata: SessionMessage['display_metadata']): MessageReaction[] {
@@ -392,6 +404,12 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
           message.timestamp,
           ...parts.map(part => part.timestamp)
         )
+        // The turn's spend is stamped on its FINAL assistant row; the merged bubble carries it.
+        const mergedTurnUsage = messageTurnUsage(message.display_metadata)
+
+        if (mergedTurnUsage) {
+          activeAssistant.turnUsage = mergedTurnUsage
+        }
 
         return
       }
@@ -400,6 +418,7 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
     }
 
     const reactions = messageReactions(message.display_metadata)
+    const turnUsage = message.role === 'assistant' ? messageTurnUsage(message.display_metadata) : undefined
     // Gateway resume names the durable row id `row_id`; the REST transcript
     // prefetch ships the same messages.id as a numeric `id`. Either one lets
     // reactions address this exact row later.
@@ -415,6 +434,7 @@ export function toChatMessages(messages: SessionMessage[]): ChatMessage[] {
       timestamp: earliestTimestamp(message.timestamp, ...parts.map(part => part.timestamp)),
       ...(rowId !== undefined ? { rowId } : {}),
       ...(reactions.length ? { reactions } : {}),
+      ...(turnUsage ? { turnUsage } : {}),
       ...(extractedAttachmentRefs ? { attachmentRefs: extractedAttachmentRefs } : {})
     })
 

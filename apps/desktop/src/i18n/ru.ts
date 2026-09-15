@@ -3550,6 +3550,7 @@ export const ru = defineLocale({
       thought: 'Помыслил',
       thoughtBriefly: 'Кратко подумал',
       thoughtFor: duration => `Думал ${duration}`,
+      turnUsageTitle: 'Этот ответ: вызовов API · prompt-токенов (доля из кэша) · токенов ответа · оценка стоимости',
       turnDuration: duration => `Этот ход занял ${duration}`,
       today: time => `Сегодня, ${time}`,
       yesterday: time => `Вчера, ${time}`,

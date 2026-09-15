@@ -644,6 +644,21 @@ export type TimelineDisplayMetadata =
       duration_seconds?: number
     }
   | { reactions: MessageReaction[] }
+  | { turn_usage: TurnUsage }
+
+/** One turn's own spend (tui_gateway `_turn_usage_delta`): the delta of the session counters
+ *  between message.start and message.complete. `cost_usd` follows the provider's list price
+ *  (OpenRouter: estimated until reconciled). Persisted on the turn's final assistant row. */
+export interface TurnUsage {
+  calls: number
+  input: number
+  cache_read: number
+  output: number
+  reasoning?: number
+  cost_usd: number
+  cost_status?: string
+  cache_hit_pct?: number
+}
 
 /** One emoji reaction on a message. One per author, iOS-Tapback style. */
 export interface MessageReaction {

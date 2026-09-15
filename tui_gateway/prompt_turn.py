@@ -430,6 +430,51 @@ class _TurnRun:
     prompt_text: str = ""
     marker_key: str = ""
     receipt_attempted: bool = False
+    usage_before: dict = dataclasses.field(default_factory=dict)  # session counters at turn start (per-turn delta)
+
+
+_TURN_USAGE_FIELDS = ("input", "output", "cache_read", "reasoning", "calls", "cost_usd")
+
+
+def _usage_counters(agent) -> dict:
+    """Session-cumulative counters the per-turn delta is taken over (same source as ``_get_usage``)."""
+    g = lambda k: int(getattr(agent, k, 0) or 0)  # noqa: E731
+    return {
+        "input": g("session_input_tokens"), "output": g("session_output_tokens"),
+        "cache_read": g("session_cache_read_tokens"), "reasoning": g("session_reasoning_tokens"),
+        "calls": g("session_api_calls"),
+        "cost_usd": float(getattr(agent, "session_estimated_cost_usd", 0.0) or 0.0),
+    }
+
+
+def _turn_usage_delta(before: dict, agent) -> dict | None:
+    """``{input, output, cache_read, reasoning, calls, cost_usd, cost_status}`` spent by THIS turn — the
+    reply's own price tag, next to the session total the status bar already shows. None when the turn
+    made no API call (cancelled before the first request)."""
+    after = _usage_counters(agent)
+    delta = {k: after[k] - before.get(k, 0) for k in _TURN_USAGE_FIELDS}
+    if delta["calls"] <= 0 and delta["input"] <= 0 and delta["output"] <= 0:
+        return None
+    delta["cost_usd"] = round(max(delta["cost_usd"], 0.0), 6)
+    delta["cost_status"] = str(getattr(agent, "session_cost_status", "") or "unknown")
+    prompt = delta["input"] + delta["cache_read"]
+    if prompt > 0 and delta["cache_read"] > 0:
+        delta["cache_hit_pct"] = max(0, min(100, round(delta["cache_read"] / prompt * 100)))
+    return delta
+
+
+def _persist_turn_usage(session: dict, agent, turn_usage: dict) -> None:
+    """Best-effort: stamp the delta on the turn's final assistant row (display_metadata.turn_usage)."""
+    db = getattr(agent, "_session_db", None)
+    key = session.get("session_key") or getattr(agent, "session_id", None)
+    if db is None or not key:
+        return
+    try:
+        row_id = db.latest_message_row_id(key, role="assistant", require_text=False)
+        if row_id is not None:
+            db.set_message_turn_usage(key, int(row_id), turn_usage)
+    except Exception as exc:  # noqa: BLE001 — a cost badge must never fail the turn
+        logger.debug("turn usage persist skipped: %s", exc)
 
 
 def _prepare_turn_input(sid: str, session: dict, st: _TurnRun, text: Any, images: list[str]):
@@ -546,6 +591,7 @@ def _invoke_agent(
     _title_key = session.get("session_key") or sid
     agent._on_session_title = lambda t, _src, _k=_title_key: _emit(
         "session.title", sid, {"session_id": _k, "title": t})
+    st.usage_before = _usage_counters(agent)
     _usage_stop, _usage_thread = _start_usage_ticker(sid, agent)
     try:
         st.result = agent.run_conversation(run_message, **st.run_kwargs)
@@ -625,6 +671,9 @@ def _complete_turn_payload(session: dict, st: _TurnRun, status_note: str | None,
     result, agent = st.result, st.agent
     raw, status, last_reasoning = _turn_outcome(result)
     payload = {"text": raw, "usage": _get_usage(agent), "status": status}
+    if turn_usage := _turn_usage_delta(st.usage_before, agent):
+        payload["turn_usage"] = turn_usage
+        _persist_turn_usage(session, agent, turn_usage)
     if last_reasoning:
         payload["reasoning"] = last_reasoning
     if status_note:

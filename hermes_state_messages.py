@@ -412,6 +412,24 @@ class SessionMessagesMixin:
             return reactions
         return self._execute_write(_do)
 
+    TURN_USAGE_METADATA_KEY = "turn_usage"
+
+    def set_message_turn_usage(self, session_id: str, message_row_id: int, usage: Dict[str, Any]) -> bool:
+        """Persist one turn's token/cost delta (``{calls, input, cache_read, output, cost_usd, ...}``) under
+        ``display_metadata.turn_usage`` of the turn's final assistant row so a re-opened transcript shows
+        per-reply spend, not only the live ``message.complete`` frame. Returns False for a foreign row."""
+        if not session_id or message_row_id is None or not isinstance(usage, dict):
+            return False
+        def _do(conn):
+            row = conn.execute(_DISPLAY_META_ROW_SQL, (message_row_id, session_id)).fetchone()
+            if row is None:
+                return False
+            meta = self._decode_display_metadata(row[0]) or {}
+            meta[self.TURN_USAGE_METADATA_KEY] = usage
+            conn.execute(_SET_DISPLAY_META_SQL, (self._encode_display_metadata(meta), message_row_id))
+            return True
+        return bool(self._execute_write(_do))
+
     def get_message_reactions(self, session_id: str, message_row_id: int) -> List[Dict[str, Any]]:
         """Reaction list persisted on one message row (never ``None``)."""
         if not session_id or message_row_id is None:

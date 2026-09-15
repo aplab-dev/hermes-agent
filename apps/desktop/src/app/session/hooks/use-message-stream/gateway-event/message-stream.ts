@@ -17,8 +17,21 @@ import { setCurrentUsage, setTurnStartedAt } from '@/store/session'
 import { refreshSupportedSessionControlAfterTurn } from '@/store/session-control'
 import { pruneFinishedSessionSubagents } from '@/store/subagents'
 import { clearActiveSessionTodos } from '@/store/todos'
+import type { TurnUsage } from '@/types/hermes'
 
 import type { GatewayEventContext } from './types'
+
+/** `turn_usage` from a newer gateway's message.complete; undefined on older backends or a malformed frame. */
+function parseTurnUsage(raw: unknown): TurnUsage | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined
+  }
+
+  const u = raw as Record<string, unknown>
+
+  return typeof u.cost_usd === 'number' && typeof u.calls === 'number' ? (raw as TurnUsage) : undefined
+}
+
 
 function firstBillingLine(text: string): string {
   return (text || '').split('\n')[0]?.trim() ?? ''
@@ -349,7 +362,14 @@ export function handleMessageStreamEvent(ctx: GatewayEventContext): boolean {
           }
         : undefined
 
-    completeAssistantMessage(sessionId, finalText, payload?.response_previewed, failure, occurredAt)
+    completeAssistantMessage(
+      sessionId,
+      finalText,
+      payload?.response_previewed,
+      failure,
+      occurredAt,
+      parseTurnUsage(payload?.turn_usage)
+    )
 
     // Structured billing wall forwarded by the gateway (out of credits /
     // payment required) — cache it + raise a billing-specific toast.
