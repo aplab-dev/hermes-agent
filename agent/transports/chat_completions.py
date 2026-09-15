@@ -5,6 +5,7 @@ provider-specific work lives in build_kwargs (max_tokens, reasoning, extra_body)
 """
 
 import json
+import os
 from typing import Any
 from urllib.parse import urlparse
 
@@ -290,7 +291,30 @@ def _finish_kwargs(api_kwargs: dict[str, Any], sanitized: list, params: dict, *,
         api_kwargs, messages=sanitized, tools=api_kwargs.get("tools"), supports_prompt_cache_key=supports_prompt_cache_key,
         session_id=params.get("session_id"), cache_scope_id=params.get("cache_scope_id"),
     )
+    _wire_dump(api_kwargs, params)
     return api_kwargs
+
+
+def _wire_dump(api_kwargs: dict[str, Any], params: dict) -> None:
+    """``HERMES_WIRE_DUMP=<file.jsonl>``: append one line per request with exactly what goes on the wire
+    (model, every message verbatim, tool names). Debug aid for "the model doesn't see my tool result"
+    class of bugs — the persisted session is NOT the request; this is. Never on by default."""
+    path = os.environ.get("HERMES_WIRE_DUMP")
+    if not path:
+        return
+    try:
+        import json as _json
+        import time as _time
+        record = {
+            "ts": _time.time(), "model": api_kwargs.get("model"), "session_id": params.get("session_id"),
+            "tools": [t.get("function", {}).get("name") for t in (api_kwargs.get("tools") or []) if isinstance(t, dict)],
+            "messages": api_kwargs.get("messages"),
+            "extra": {k: v for k, v in api_kwargs.items() if k not in ("messages", "tools", "model")},
+        }
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except Exception:  # noqa: BLE001 — a debug dump must never break a request
+        pass
 
 
 def _sanitize_message(msg: Any, strip_extra_content: bool) -> dict | None:
