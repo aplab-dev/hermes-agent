@@ -28,12 +28,13 @@ export function toggleStatusbarVisible() {
 // navigation, not status, so they start out of the way. The approval pill
 // (the yolo zap) stays: whether dangerous commands run unasked is state the
 // user should see at a glance. The per-turn
-// session readouts (running/session timers, context meter, cache hit rate,
-// tokens/sec) are diagnostics most users don't watch, so they start hidden too
-// and the bar stays quiet mid-turn.
+// session readouts (running/session timers, context meter, tokens/sec) are
+// diagnostics most users don't watch, so they start hidden too and the bar
+// stays quiet mid-turn. Cache hit rate and session cost stay on: together they
+// are the "is this session cheap" readout, and a low hit rate is the first
+// sign a mid-session model switch or a shifting system prompt is wasting money.
 export const STATUSBAR_HIDDEN_BY_DEFAULT: readonly string[] = [
   'agents',
-  'cache-hit-rate',
   'context-usage',
   'cron',
   'running-timer',
