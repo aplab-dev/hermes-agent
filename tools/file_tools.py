@@ -17,6 +17,7 @@ import threading
 import time
 from contextlib import ExitStack
 from pathlib import Path
+from typing import Optional
 
 from agent.file_safety import get_read_block_error
 from tools.binary_extensions import has_binary_extension
@@ -60,6 +61,24 @@ def _get_max_read_chars() -> int:
         valid = isinstance(val, (int, float)) and val > 0
         _max_read_chars_cached = int(val) if valid else _DEFAULT_MAX_READ_CHARS
     return _max_read_chars_cached
+
+
+_DEFAULT_DEDUP_MIN_BYTES = 4096
+_dedup_min_bytes_cached: Optional[int] = None
+
+
+def _get_dedup_min_bytes() -> int:
+    """``file_read_dedup_min_bytes`` from config.yaml: repeated reads of files at or below this size
+    return the content again instead of the "unchanged" stub (cached per process; 0 = always stub)."""
+    global _dedup_min_bytes_cached
+    if _dedup_min_bytes_cached is None:
+        try:
+            from hermes_cli.config import load_config
+            val = load_config().get("file_read_dedup_min_bytes")
+        except Exception:
+            val = None
+        _dedup_min_bytes_cached = int(val) if isinstance(val, (int, float)) and val >= 0 else _DEFAULT_DEDUP_MIN_BYTES
+    return _dedup_min_bytes_cached
 
 
 def _truncate_to_char_budget(content: str, max_chars: int) -> tuple[str, int, bool]:
@@ -602,7 +621,12 @@ def read_file_tool(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT, 
         if cached_mtime is not None:
             try:
                 if os.path.getmtime(resolved_str) == cached_mtime and content_served_in_generation:
-                    return _dedup_stub_or_block(task_data, dedup_key, path)
+                    # Small files are re-served verbatim instead of stubbed: the stub saves nothing
+                    # measurable there, while a weak tool-follower (DeepSeek Flash, small local
+                    # models) reads "refer to the earlier result" as "content missing" and loops —
+                    # re-read → stub → cat via terminal → re-read → BLOCKED (observed 47-call turns).
+                    if os.path.getsize(resolved_str) > _get_dedup_min_bytes():
+                        return _dedup_stub_or_block(task_data, dedup_key, path)
             except OSError:
                 pass  # stat failed — fall through to full read
 

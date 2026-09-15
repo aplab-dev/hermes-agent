@@ -404,9 +404,10 @@ class TestFileDedup(unittest.TestCase):
         except OSError:
             pass
 
+    @patch("tools.file_tools._get_dedup_min_bytes", return_value=0)
     @patch("tools.file_tools._get_file_ops")
-    def test_second_read_returns_dedup_stub(self, mock_ops):
-        """Second read of same file+range returns non-content dedup status."""
+    def test_second_read_returns_dedup_stub(self, mock_ops, _min_bytes):
+        """Second read of same file+range returns non-content dedup status (stub threshold 0)."""
         mock_ops.return_value = _make_fake_ops(
             content="line one\nline two\n", file_size=20,
         )
@@ -421,6 +422,26 @@ class TestFileDedup(unittest.TestCase):
         self.assertIn("unchanged", r2.get("message", ""))
         self.assertFalse(r2.get("content_returned"))
         self.assertNotIn("content", r2)
+
+    @patch("tools.file_tools._get_file_ops")
+    def test_small_file_is_reserved_not_stubbed(self, mock_ops):
+        """Files at or below file_read_dedup_min_bytes (default 4096) come back verbatim on repeat:
+        weak tool-followers read the stub as "content missing" and loop."""
+        mock_ops.return_value = _make_fake_ops(content="line one\nline two\n", file_size=20)
+        r1 = json.loads(read_file_tool(self._tmpfile, task_id="small"))
+        r2 = json.loads(read_file_tool(self._tmpfile, task_id="small"))
+        r3 = json.loads(read_file_tool(self._tmpfile, task_id="small"))
+        for r in (r1, r2, r3):
+            self.assertNotIn("dedup", r)
+            self.assertIn("line one", r.get("content", ""))
+
+    @patch("tools.file_tools._get_dedup_min_bytes", return_value=10)
+    @patch("tools.file_tools._get_file_ops")
+    def test_file_above_threshold_is_stubbed(self, mock_ops, _min_bytes):
+        mock_ops.return_value = _make_fake_ops(content="line one\nline two\n", file_size=20)
+        json.loads(read_file_tool(self._tmpfile, task_id="big"))
+        r2 = json.loads(read_file_tool(self._tmpfile, task_id="big"))
+        self.assertTrue(r2.get("dedup"))
 
     @patch("tools.file_tools._get_file_ops")
     def test_write_rejects_internal_read_status_text(self, mock_ops):
@@ -456,6 +477,8 @@ class TestFileDedup(unittest.TestCase):
 # Dedup stub-loop guard (issue #15759)
 # ---------------------------------------------------------------------------
 
+# Stub/BLOCK mechanics are exercised on tiny fixtures: force the small-file re-serve threshold off.
+@patch("tools.file_tools._get_dedup_min_bytes", lambda: 0)
 class TestDedupStubLoopGuard(unittest.TestCase):
     """Repeated dedup stubs must escalate to a hard BLOCKED error so weak
     tool-following models don't burn iteration budget in an infinite loop
@@ -609,6 +632,8 @@ class TestDedupStubLoopGuard(unittest.TestCase):
 # Dedup reset on compression
 # ---------------------------------------------------------------------------
 
+# Stub/BLOCK mechanics are exercised on tiny fixtures: force the small-file re-serve threshold off.
+@patch("tools.file_tools._get_dedup_min_bytes", lambda: 0)
 class TestDedupResetOnCompression(unittest.TestCase):
     """Compaction starts a new full-content recovery generation."""
 

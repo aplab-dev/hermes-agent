@@ -73,11 +73,24 @@ def _check_skill_view_dedup(task_id, name, file_path) -> str | None:
             if changed:
                 cache.pop(key, None)
                 return None
+            # Same rule as read_file (``file_read_dedup_min_bytes``): a small SKILL.md is re-served
+            # verbatim — weak tool-followers read the stub as "content missing" and loop.
+            if size <= _dedup_min_bytes():
+                cache.pop(key, None)
+                return None
             return json.dumps({
                 "success": True, "status": "unchanged", "name": rec_name,
                 "file": file_path or "SKILL.md", "dedup": True, "content_returned": False,
                 "message": _SKILL_VIEW_DEDUP_MESSAGE}, ensure_ascii=False)
     return None
+
+
+def _dedup_min_bytes() -> int:
+    try:
+        from tools.file_tools import _get_dedup_min_bytes
+        return _get_dedup_min_bytes()
+    except Exception:  # noqa: BLE001 — file tools optional in stripped envs
+        return 0
 
 
 def reset_skill_view_dedup(task_id: str | None = None) -> None:

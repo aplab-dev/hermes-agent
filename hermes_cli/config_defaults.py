@@ -478,6 +478,11 @@ DEFAULT_CONFIG = {
     # Max chars per read_file call; larger reads are rejected with offset+limit guidance. 100K chars
     # ≈ 25–35K tokens.
     "file_read_max_chars": 100_000,
+    # Repeated identical read_file calls on an unchanged file normally get an "unchanged, refer to the
+    # earlier result" stub. Files at or below this size are re-served verbatim instead: the stub saves
+    # nothing there, and weak tool-followers (DeepSeek Flash, small local models) read it as "content
+    # missing" and loop. 0 = always stub.
+    "file_read_dedup_min_bytes": 4096,
     # Seconds the first agent build waits for background MCP discovery before snapshotting its tool
     # list. Returns the instant discovery completes (no MCP servers → ~0s); the bound only bites
     # when a server is still connecting. Turn-1 latency knob only: a server that misses it is picked

@@ -27,6 +27,8 @@ def skills_home(tmp_path, monkeypatch):
     refs.mkdir()
     (refs / "guide.md").write_text("# Guide\n\nDetailed reference content here.\n")
     monkeypatch.setenv("HERMES_HOME", str(home))
+    # Fixtures are tiny; stub mechanics need the small-file re-serve threshold off.
+    monkeypatch.setattr("tools.skills_tool_dedup._dedup_min_bytes", lambda: 0)
     reset_skill_view_dedup()
     return home
 
@@ -92,3 +94,13 @@ class TestSkillViewDedup:
         # conversation_compression imports this lazily; keep the seam stable.
         from tools.skills_tool import reset_skill_view_dedup as f
         f(None)
+
+
+def test_small_skill_is_reserved_verbatim(skills_home, monkeypatch):
+    """At or below file_read_dedup_min_bytes the second view returns the content again (no stub)."""
+    monkeypatch.setattr("tools.skills_tool_dedup._dedup_min_bytes", lambda: 4096)
+    first = _view("demo-dedup-skill", task="t-small")
+    second = _view("demo-dedup-skill", task="t-small")
+    assert "dedup" not in second
+    assert second.get("content") == first.get("content")
+
