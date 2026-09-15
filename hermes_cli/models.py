@@ -563,6 +563,8 @@ def fetch_openrouter_models(
     """Return the curated OpenRouter picker list, refreshed from the live catalog when possible."""
     global _openrouter_catalog_cache
 
+    if _openrouter_model_allowlist():
+        force_refresh = True  # an operator shortlist must never be served from a stale curated cache
     if _openrouter_catalog_cache is not None and not force_refresh:
         return list(_openrouter_catalog_cache)
 
