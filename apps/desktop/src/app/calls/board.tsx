@@ -1,25 +1,49 @@
 /**
- * THE BOARD — a Miro-style infinite canvas of one session's LLM calls. Every API call is a column
- * (left → right = time); inside a column the wire prompt is stacked top → bottom, then the model's
- * thinking and output. Messages byte-identical to the previous call (the cacheable prefix) are
- * drawn as thin ghost bars, so the prompt's growth — what each call actually added — is the shape
- * you see. Pan with a two-finger scroll / drag on the background, zoom with pinch / ⌘-wheel / ± keys,
- * `0` fits everything. Text stays real DOM: selectable, foldable, searchable at any zoom.
+ * THE BOARD — one LLM call at a time on a pan/zoom canvas, with the session's calls as a strip to
+ * step through (◀ ▶, ← →, or click a cell). The call is laid out as one tall column: the wire prompt
+ * top → bottom, then the model's thinking and output. Everything is expanded by default; the level
+ * toolbar folds components by kind — system / user / assistant / tool results / thinking / output —
+ * to "half" (a preview with an expand toggle) or "collapsed" (one line each), or all at once.
+ * Messages byte-identical to the previous call carry a "same as prev" tag; the rest is highlighted.
+ * Pan by drag / two-finger scroll, zoom by pinch / ⌘-wheel / ±, `0` fits width, `9` fits all. Text
+ * stays real DOM: selectable, searchable at any zoom.
  */
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 
-import type { ApiRequestFull, WireMessage } from '@/api/requests'
+import type { ApiRequestFull } from '@/api/requests'
 import { Codicon } from '@/components/ui/codicon'
 import { compactNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { CallResponse, type Copy, fmtCost, fmtSecs, fmtTime, MessageCard, wireText } from './cards'
+import {
+  ALL_FULL,
+  CallResponse,
+  type Copy,
+  fmtCost,
+  fmtSecs,
+  fmtTime,
+  type Kind,
+  KINDS,
+  type Level,
+  type Levels,
+  MessageCard,
+  withLevel
+} from './cards'
 
-const COL_WIDTH = 560
-const COL_GAP = 48
-const PAD = 40
-const MIN_SCALE = 0.08
+const COL_WIDTH = 920
+const PAD = 32
+const MIN_SCALE = 0.1
 const MAX_SCALE = 2.5
+const LEVEL_ORDER: Level[] = ['full', 'half', 'min']
 
 interface View {
   x: number
@@ -29,94 +53,197 @@ interface View {
 
 const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
 
-function GhostBar({ msg, index, chars }: { msg: WireMessage; index: number; chars: number }) {
-  const role = msg.role || '?'
+function levelLabel(level: Level, t: Copy): string {
+  return level === 'full' ? t.levelFull : level === 'half' ? t.levelHalf : t.levelMin
+}
+
+function LevelToolbar({ levels, onChange, t }: { levels: Levels; onChange: (next: Levels) => void; t: Copy }) {
+  const cycle = (kind: Kind) => {
+    const next = LEVEL_ORDER[(LEVEL_ORDER.indexOf(levels[kind]) + 1) % LEVEL_ORDER.length]
+    onChange({ ...levels, [kind]: next })
+  }
 
   return (
-    <div
-      className="flex h-5 items-center gap-2 rounded-sm border-l-[3px] border-l-(--ui-stroke-secondary) bg-(--ui-control-hover-background) px-2 text-[0.625rem] uppercase tracking-wide text-(--ui-text-quaternary)"
-      title={wireText(msg.content).slice(0, 200)}
-    >
-      <span className="font-semibold">{role}</span>
-      {msg.tool_calls?.length ? <span className="normal-case">{msg.tool_calls.map(t => t.function?.name).join(', ')}</span> : null}
-      <span className="ml-auto font-mono normal-case tabular-nums">
-        #{index + 1} · {compactNumber(chars)}
-      </span>
+    <div className="flex flex-wrap items-center gap-1 text-[0.6875rem]">
+      <span className="text-(--ui-text-tertiary)">{t.all}:</span>
+      {LEVEL_ORDER.map(level => (
+        <button
+          className={cn(
+            'rounded border px-1.5 py-0.5',
+            KINDS.every(k => levels[k] === level)
+              ? 'border-primary/60 bg-primary/15 text-foreground'
+              : 'border-(--ui-stroke-tertiary) text-(--ui-text-tertiary) hover:text-foreground'
+          )}
+          key={level}
+          onClick={() => onChange(withLevel(level))}
+          type="button"
+        >
+          {levelLabel(level, t)}
+        </button>
+      ))}
+      <span className="mx-1 text-(--ui-stroke-secondary)">|</span>
+      {KINDS.map(kind => (
+        <button
+          className={cn(
+            'rounded border px-1.5 py-0.5',
+            levels[kind] === 'full' && 'border-(--ui-stroke-tertiary) text-foreground',
+            levels[kind] === 'half' && 'border-amber-500/50 bg-amber-500/10 text-foreground',
+            levels[kind] === 'min' &&
+              'border-(--ui-stroke-tertiary) bg-(--ui-control-hover-background) text-(--ui-text-tertiary) line-through'
+          )}
+          key={kind}
+          onClick={() => cycle(kind)}
+          title={`${t.kinds[kind]}: ${levelLabel(levels[kind], t)}`}
+          type="button"
+        >
+          {t.kinds[kind]}
+          <span className="ml-1 font-mono text-(--ui-text-quaternary)">
+            {levels[kind] === 'full' ? '■' : levels[kind] === 'half' ? '◧' : '▭'}
+          </span>
+        </button>
+      ))}
     </div>
   )
 }
 
-function CallColumn({
-  call,
-  index,
-  selected,
+function CallStrip({
+  calls,
+  selectedId,
   onSelect,
   t
 }: {
-  call: ApiRequestFull
-  index: number
-  selected: boolean
-  onSelect: () => void
+  calls: ApiRequestFull[]
+  selectedId: null | number
+  onSelect: (id: number) => void
   t: Copy
 }) {
+  const idx = calls.findIndex(c => c.id === selectedId)
+
+  const go = (delta: number) => {
+    const next = calls[Math.min(calls.length - 1, Math.max(0, idx + delta))]
+
+    if (next) {
+      onSelect(next.id)
+    }
+  }
+
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      <button
+        className="rounded p-1 hover:bg-accent disabled:opacity-30"
+        disabled={idx <= 0}
+        onClick={() => go(-1)}
+        title={t.prev}
+        type="button"
+      >
+        <Codicon name="chevron-left" size="0.8rem" />
+      </button>
+      <div className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto">
+        {calls.map((c, i) => {
+          const prompt = c.prompt_tokens ?? 0
+          const hit = prompt > 0 && c.cache_read_tokens ? Math.round((c.cache_read_tokens / prompt) * 100) : null
+
+          return (
+            <button
+              className={cn(
+                'shrink-0 rounded border px-1.5 py-0.5 text-left font-mono text-[0.625rem] leading-tight tabular-nums',
+                c.id === selectedId ? 'border-primary/60 bg-primary/15' : 'border-(--ui-stroke-tertiary) hover:bg-accent',
+                c.status === 'error' && 'border-destructive/50'
+              )}
+              key={c.id}
+              onClick={() => onSelect(c.id)}
+              title={`#${i + 1} · ${fmtTime(c.started_at)} · ${compactNumber(prompt)}↑ ${compactNumber(c.output_tokens ?? 0)}↓ · ${fmtSecs(c.started_at, c.ended_at)} · ${fmtCost(c.cost_usd)}`}
+              type="button"
+            >
+              <div>#{i + 1}</div>
+              <div className="text-(--ui-text-tertiary)">
+                {compactNumber(prompt)}
+                {hit !== null ? `·${hit}%` : ''}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+      <button
+        className="rounded p-1 hover:bg-accent disabled:opacity-30"
+        disabled={idx < 0 || idx >= calls.length - 1}
+        onClick={() => go(1)}
+        title={t.next}
+        type="button"
+      >
+        <Codicon name="chevron-right" size="0.8rem" />
+      </button>
+    </div>
+  )
+}
+
+function CallColumn({ call, index, levels, t }: { call: ApiRequestFull; index: number; levels: Levels; t: Copy }) {
   const messages = call.request?.messages ?? []
   const shared = Math.min(call.prefix_shared_msgs ?? 0, messages.length)
   const prompt = call.prompt_tokens ?? 0
   const cached = call.cache_read_tokens ?? 0
   const hit = prompt > 0 ? Math.round((cached / prompt) * 100) : null
-  const [expandPrefix, setExpandPrefix] = useState(false)
+
+  const cacheablePct =
+    call.request_chars && call.prefix_shared_chars ? Math.round((call.prefix_shared_chars / call.request_chars) * 100) : null
 
   return (
     <div
-      className={cn(
-        'absolute top-0 flex flex-col gap-2 rounded-lg border bg-background p-3 shadow-sm',
-        selected ? 'border-primary/60 ring-2 ring-primary/30' : 'border-(--ui-stroke-tertiary)'
-      )}
+      className="absolute top-0 flex flex-col gap-2 rounded-lg border border-(--ui-stroke-tertiary) bg-background p-4 shadow-sm"
       data-call-column={call.id}
       onPointerDown={e => e.stopPropagation()}
-      style={{ left: PAD + index * (COL_WIDTH + COL_GAP), width: COL_WIDTH }}
+      style={{ left: PAD, width: COL_WIDTH }}
     >
-      <button className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-left" onClick={onSelect} type="button">
-        <span className="font-mono text-[0.875rem] font-semibold">#{index + 1}</span>
-        <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{fmtTime(call.started_at)}</span>
-        <span className="font-mono text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)">
-          {compactNumber(prompt)}↑{hit !== null ? ` (${hit}% ${t.cached})` : ''} · {compactNumber(call.output_tokens ?? 0)}↓ ·{' '}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="font-mono text-[1rem] font-semibold">#{index + 1}</span>
+        <span className="text-[0.75rem] text-(--ui-text-tertiary)">{fmtTime(call.started_at)}</span>
+        <span className="font-mono text-[0.75rem] tabular-nums text-(--ui-text-tertiary)">
+          {call.model} · {compactNumber(prompt)}↑ · {compactNumber(call.output_tokens ?? 0)}↓ ·{' '}
           {fmtSecs(call.started_at, call.ended_at)}
+          {call.first_chunk_at && call.started_at ? ` · ${t.ttfb} ${(call.first_chunk_at - call.started_at).toFixed(1)}s` : ''}
         </span>
-        <span className="ml-auto font-mono text-[0.75rem] tabular-nums">
+        <span className="ml-auto font-mono text-[0.875rem] tabular-nums">
           {call.status === 'error' ? <span className="text-destructive">{t.err}</span> : fmtCost(call.cost_usd)}
         </span>
-      </button>
-      <div className="text-[0.6875rem] text-(--ui-text-tertiary)">
-        {call.model} · {messages.length} msgs · {call.finish_reason ?? call.status}
-        {shared > 0 && (
-          <>
-            {' · '}
-            <button className="underline-offset-2 hover:underline" onClick={() => setExpandPrefix(v => !v)} type="button">
-              {t.prefixNote(shared, call.prefix_shared_chars ?? 0)}
-            </button>
-          </>
-        )}
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[0.75rem]">
+        <span>
+          <span className="text-(--ui-text-tertiary)">{t.cacheable}: </span>
+          <span className="font-mono tabular-nums">
+            {shared}/{messages.length} msgs · {compactNumber(call.prefix_shared_chars ?? 0)} {t.chars}
+            {cacheablePct !== null && ` (${cacheablePct}%)`}
+          </span>
+        </span>
+        <span>
+          <span className="text-(--ui-text-tertiary)">{t.cacheHit}: </span>
+          <span className={cn('font-mono tabular-nums', hit !== null && hit >= 50 && 'text-emerald-600 dark:text-emerald-400')}>
+            {call.prompt_tokens === null
+              ? t.noUsage
+              : `${compactNumber(cached)} / ${compactNumber(prompt)} tok${hit !== null ? ` (${hit}%)` : ''}`}
+          </span>
+        </span>
+        <span className="text-(--ui-text-tertiary)">
+          {call.tool_count ?? 0} {t.tools}
+          {call.request?.tools?.length ? `: ${call.request.tools.join(', ')}` : ''}
+        </span>
       </div>
 
+      <h3 className="mt-1 text-[0.8125rem] font-semibold">{t.request}</h3>
       <div className="flex flex-col gap-1.5">
-        {messages.map((m, i) => {
-          const isShared = i < shared
-
-          if (isShared && !expandPrefix) {
-            return <GhostBar chars={wireText(m.content).length} index={i} key={i} msg={m} />
-          }
-
-          return (
-            <div className={cn(isShared && 'opacity-60')} key={i}>
-              <MessageCard index={i} isNew={shared > 0 && !isShared} msg={m} t={t} />
-            </div>
-          )
-        })}
+        {messages.map((m, i) => (
+          <div className="relative" key={i}>
+            {shared > 0 && i < shared && (
+              <span className="absolute top-1 right-2 z-10 rounded bg-(--ui-control-hover-background) px-1 text-[0.5625rem] uppercase tracking-wide text-(--ui-text-quaternary)">
+                {t.same}
+              </span>
+            )}
+            <MessageCard index={i} isNew={shared > 0 && i >= shared} levels={levels} msg={m} t={t} />
+          </div>
+        ))}
       </div>
 
-      <div className="mt-1 border-t border-dashed border-(--ui-stroke-secondary) pt-2">
-        <CallResponse call={call} t={t} />
+      <div className="mt-2 border-t border-dashed border-(--ui-stroke-secondary) pt-2">
+        <CallResponse call={call} levels={levels} t={t} />
       </div>
     </div>
   )
@@ -135,27 +262,34 @@ export function CallsBoard({
 }) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const [view, setView] = useState<View>({ s: 0.5, x: PAD, y: PAD })
+  const [view, setView] = useState<View>({ s: 0.8, x: PAD, y: PAD })
+  const [levels, setLevels] = useState<Levels>(ALL_FULL)
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null)
   const viewRef = useRef(view)
   viewRef.current = view
+  const idx = calls.findIndex(c => c.id === selectedId)
+  const call = idx >= 0 ? calls[idx] : calls[calls.length - 1]
 
   const contentSize = useCallback(() => {
-    const el = contentRef.current
-    // Columns are absolutely positioned: width from the column count, height from the tallest one.
-    const width = PAD * 2 + calls.length * (COL_WIDTH + COL_GAP)
-    let height = 0
+    const col = contentRef.current?.querySelector<HTMLElement>('[data-call-column]')
 
-    if (el) {
-      for (const col of el.querySelectorAll<HTMLElement>('[data-call-column]')) {
-        height = Math.max(height, col.offsetHeight)
-      }
+    return { height: (col?.offsetHeight ?? 600) + PAD * 2, width: COL_WIDTH + PAD * 2 }
+  }, [])
+
+  /** Fit the column's WIDTH to the viewport (readable), scrolled to the top. */
+  const fitWidth = useCallback(() => {
+    const vp = viewportRef.current
+
+    if (!vp) {
+      return
     }
 
-    return { height: height + PAD * 2, width }
-  }, [calls.length])
+    const s = clampScale(Math.min((vp.clientWidth - 16) / (COL_WIDTH + PAD * 2), 1))
+    setView({ s, x: (vp.clientWidth - (COL_WIDTH + PAD * 2) * s) / 2, y: 8 })
+  }, [])
 
-  const fit = useCallback(() => {
+  /** Fit the WHOLE call (height included) — the bird's-eye view. */
+  const fitAll = useCallback(() => {
     const vp = viewportRef.current
 
     if (!vp) {
@@ -167,32 +301,10 @@ export function CallsBoard({
     setView({ s, x: (vp.clientWidth - width * s) / 2, y: 8 })
   }, [contentSize])
 
-  // Center the selected column at a readable zoom (keeps the current zoom if it is readable already).
-  const focusColumn = useCallback(
-    (id: number) => {
-      const vp = viewportRef.current
-      const idx = calls.findIndex(c => c.id === id)
-
-      if (!vp || idx < 0) {
-        return
-      }
-
-      const s = Math.max(viewRef.current.s, 0.6)
-      const colX = PAD + idx * (COL_WIDTH + COL_GAP)
-      setView({ s, x: (vp.clientWidth - COL_WIDTH * s) / 2 - colX * s, y: 8 })
-    },
-    [calls]
-  )
-
+  // A new call selected: back to the top at readable width (levels are kept).
   useLayoutEffect(() => {
-    // First paint: fit the whole session, then glide onto the selected call.
-    fit()
-
-    if (selectedId !== null) {
-      focusColumn(selectedId)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial placement only
-  }, [calls.length])
+    fitWidth()
+  }, [fitWidth, call?.id])
 
   // Wheel: pinch / ⌘ / ctrl → zoom around the cursor; plain two-finger scroll → pan.
   useEffect(() => {
@@ -247,7 +359,7 @@ export function CallsBoard({
     drag.current = null
   }
 
-  const zoomBy = (factor: number) => {
+  const zoomBy = useCallback((factor: number) => {
     const vp = viewportRef.current
     const v = viewRef.current
 
@@ -260,9 +372,9 @@ export function CallsBoard({
     const s = clampScale(v.s * factor)
     const k = s / v.s
     setView({ s, x: px - (px - v.x) * k, y: py - (py - v.y) * k })
-  }
+  }, [])
 
-  // ± / 0 while the board is hovered or focused.
+  // Keys while the board has focus: ← → step calls, ± zoom, 0 fit width, 9 fit all.
   useEffect(() => {
     const vp = viewportRef.current
 
@@ -275,56 +387,77 @@ export function CallsBoard({
         return
       }
 
-      if (e.key === '+' || e.key === '=') {
+      if (e.key === 'ArrowLeft' && idx > 0) {
+        onSelect(calls[idx - 1].id)
+      } else if (e.key === 'ArrowRight' && idx >= 0 && idx < calls.length - 1) {
+        onSelect(calls[idx + 1].id)
+      } else if (e.key === '+' || e.key === '=') {
         zoomBy(1.25)
       } else if (e.key === '-') {
         zoomBy(0.8)
       } else if (e.key === '0') {
-        fit()
+        fitWidth()
+      } else if (e.key === '9') {
+        fitAll()
+      } else {
+        return
       }
+
+      e.preventDefault()
     }
 
     vp.addEventListener('keydown', onKey)
 
     return () => vp.removeEventListener('keydown', onKey)
-     
-  }, [fit])
+  }, [calls, idx, onSelect, zoomBy, fitWidth, fitAll])
 
   const transform: CSSProperties = useMemo(
     () => ({ transform: `translate(${view.x}px, ${view.y}px) scale(${view.s})`, transformOrigin: '0 0' }),
     [view]
   )
 
+  if (!call) {
+    return null
+  }
+
   return (
-    <div className="relative h-full min-h-0 w-full">
-      <div
-        className="absolute inset-0 cursor-grab touch-none select-none overflow-hidden bg-[radial-gradient(circle,var(--ui-stroke-tertiary)_1px,transparent_1px)] [background-size:24px_24px] active:cursor-grabbing"
-        onPointerCancel={endDrag}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        ref={viewportRef}
-        tabIndex={0}
-      >
-        <div className="absolute top-0 left-0 select-text will-change-transform" ref={contentRef} style={transform}>
-          {calls.map((call, i) => (
-            <CallColumn call={call} index={i} key={call.id} onSelect={() => { onSelect(call.id); focusColumn(call.id) }} selected={call.id === selectedId} t={t} />
-          ))}
-        </div>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-col gap-1.5 border-b border-(--ui-stroke-tertiary) px-3 py-1.5">
+        <CallStrip calls={calls} onSelect={onSelect} selectedId={call.id} t={t} />
+        <LevelToolbar levels={levels} onChange={setLevels} t={t} />
       </div>
 
-      <div className="absolute right-3 bottom-3 flex items-center gap-1 rounded-md border border-(--ui-stroke-tertiary) bg-background/90 p-1 text-[0.75rem] shadow-sm backdrop-blur">
-        <button className="rounded px-1.5 py-0.5 hover:bg-accent" onClick={() => zoomBy(0.8)} title="−" type="button">
-          <Codicon name="zoom-out" size="0.8rem" />
-        </button>
-        <span className="w-10 text-center font-mono tabular-nums">{Math.round(view.s * 100)}%</span>
-        <button className="rounded px-1.5 py-0.5 hover:bg-accent" onClick={() => zoomBy(1.25)} title="+" type="button">
-          <Codicon name="zoom-in" size="0.8rem" />
-        </button>
-        <button className="rounded px-1.5 py-0.5 hover:bg-accent" onClick={fit} title="0" type="button">
-          <Codicon name="screen-full" size="0.8rem" />
-        </button>
-        <span className="ml-1 pr-1 text-(--ui-text-quaternary)">{t.boardHint}</span>
+      <div className="relative min-h-0 flex-1">
+        <div
+          className="absolute inset-0 cursor-grab touch-none select-none overflow-hidden bg-[radial-gradient(circle,var(--ui-stroke-tertiary)_1px,transparent_1px)] [background-size:24px_24px] outline-none active:cursor-grabbing"
+          onPointerCancel={endDrag}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          ref={viewportRef}
+          tabIndex={0}
+        >
+          <div className="absolute top-0 left-0 select-text will-change-transform" ref={contentRef} style={transform}>
+            <CallColumn call={call} index={idx >= 0 ? idx : calls.length - 1} key={call.id} levels={levels} t={t} />
+          </div>
+        </div>
+
+        <div className="absolute right-3 bottom-3 flex items-center gap-1 rounded-md border border-(--ui-stroke-tertiary) bg-background/90 p-1 text-[0.75rem] shadow-sm backdrop-blur">
+          <button className="rounded px-1.5 py-0.5 hover:bg-accent" onClick={() => zoomBy(0.8)} title="−" type="button">
+            <Codicon name="zoom-out" size="0.8rem" />
+          </button>
+          <span className="w-10 text-center font-mono tabular-nums">{Math.round(view.s * 100)}%</span>
+          <button className="rounded px-1.5 py-0.5 hover:bg-accent" onClick={() => zoomBy(1.25)} title="+" type="button">
+            <Codicon name="zoom-in" size="0.8rem" />
+          </button>
+          <button className="rounded px-1.5 py-0.5 hover:bg-accent" onClick={fitWidth} title="0" type="button">
+            <Codicon name="screen-normal" size="0.8rem" />
+          </button>
+          <button className="rounded px-1.5 py-0.5 hover:bg-accent" onClick={fitAll} title="9" type="button">
+            <Codicon name="screen-full" size="0.8rem" />
+          </button>
+          <span className="ml-1 pr-1 text-(--ui-text-quaternary)">{t.boardHint}</span>
+        </div>
       </div>
     </div>
   )

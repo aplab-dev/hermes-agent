@@ -60,6 +60,59 @@ export function wireText(content: unknown): string {
   return content === null || content === undefined ? '' : JSON.stringify(content, null, 2)
 }
 
+/** How much of a component to show: everything, a preview (expandable), or a one-line bar. */
+export type Level = 'full' | 'half' | 'min'
+/** Component kinds the level toolbar controls. */
+export type Kind = 'system' | 'user' | 'assistant' | 'tool' | 'thinking' | 'output'
+export type Levels = Record<Kind, Level>
+export const KINDS: Kind[] = ['system', 'user', 'assistant', 'tool', 'thinking', 'output']
+export const ALL_FULL: Levels = { assistant: 'full', output: 'full', system: 'full', thinking: 'full', tool: 'full', user: 'full' }
+export const withLevel = (level: Level): Levels => ({ assistant: level, output: level, system: level, thinking: level, tool: level, user: level })
+
+const HALF_CHARS = 900
+
+function kindOf(role: string): Kind {
+  if (role === 'system' || role === 'developer') {
+    return 'system'
+  }
+
+  if (role === 'tool') {
+    return 'tool'
+  }
+
+  return role === 'assistant' ? 'assistant' : 'user'
+}
+
+/** One-line stand-in for a component at level "min". */
+function MinBar({ label, text, meta }: { label: string; text: string; meta?: string }) {
+  const preview = text.replace(/\s+/g, ' ').trim().slice(0, 110)
+
+  return (
+    <div className="flex items-center gap-2 text-[0.6875rem] text-(--ui-text-tertiary)">
+      <span className="shrink-0 font-semibold uppercase tracking-wide">{label}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-(--ui-text-quaternary)">{preview}</span>
+      {meta && <span className="shrink-0 font-mono tabular-nums">{meta}</span>}
+    </div>
+  )
+}
+
+/** Text body at a level: full = everything, half = preview with an expand toggle. */
+function Body({ text, level, mono, markdown }: { text: string; level: Level; mono?: boolean; markdown?: boolean }) {
+  if (level === 'full') {
+    if (markdown) {
+      return <Markdown text={text} />
+    }
+
+    return (
+      <pre className={cn('whitespace-pre-wrap break-words text-[0.75rem] leading-relaxed text-foreground/90', mono ? 'font-mono' : 'font-sans')}>
+        {text}
+      </pre>
+    )
+  }
+
+  return <LongText maxChars={HALF_CHARS} mono={mono} text={text} />
+}
+
 function prettyMaybeJson(text: string): string {
   const trimmed = text.trim()
 
@@ -170,11 +223,36 @@ function ToolCallCard({ name, args }: { name?: string; args?: string }) {
   )
 }
 
-export function MessageCard({ msg, index, isNew, t }: { msg: WireMessage; index: number; isNew: boolean; t: Copy }) {
+export function MessageCard({
+  msg,
+  index,
+  isNew,
+  t,
+  levels = ALL_FULL
+}: {
+  msg: WireMessage
+  index: number
+  isNew: boolean
+  t: Copy
+  levels?: Levels
+}) {
   const role = msg.role || '?'
   const text = wireText(msg.content)
-  const isSystem = role === 'system' || role === 'developer'
-  const isTool = role === 'tool'
+  const kind = kindOf(role)
+  const level = levels[kind]
+  const meta = `#${index + 1} · ${compactNumber(text.length)} ${t.chars}`
+
+  if (level === 'min') {
+    return (
+      <div className={cn('rounded-md border-l-[3px] px-3 py-1', ROLE_CLASS[role] ?? 'border-l-(--ui-stroke-secondary)', isNew && 'ring-1 ring-primary/40')}>
+        <MinBar
+          label={role}
+          meta={meta}
+          text={msg.tool_calls?.length ? `→ ${msg.tool_calls.map(tc => tc.function?.name).join(', ')} ${text}` : text}
+        />
+      </div>
+    )
+  }
 
   return (
     <div
@@ -188,26 +266,26 @@ export function MessageCard({ msg, index, isNew, t }: { msg: WireMessage; index:
         <span className="font-semibold">{role}</span>
         {msg.name && <span className="font-mono normal-case">{msg.name}</span>}
         {msg.tool_call_id && <span className="font-mono normal-case">{msg.tool_call_id}</span>}
-        <span className="ml-auto font-mono normal-case tabular-nums">
-          #{index + 1} · {compactNumber(text.length)} {t.chars}
-        </span>
+        <span className="ml-auto font-mono normal-case tabular-nums">{meta}</span>
         {isNew && <span className="rounded bg-primary/15 px-1.5 py-0.5 normal-case text-primary">{t.newSince}</span>}
       </div>
 
-      {isSystem ? (
-        <Fold defaultOpen={false} meta={`${compactNumber(text.length)} ${t.chars}`} title={t.system}>
-          <LongText maxChars={6000} mono text={text} />
-        </Fold>
-      ) : isTool ? (
-        <ToolResult text={text} />
+      {kind === 'system' ? (
+        <Body level={level} mono text={text} />
+      ) : kind === 'tool' ? (
+        <ToolResult level={level} text={text} />
       ) : (
         <>
-          {msg.reasoning_content?.trim() && (
-            <Fold defaultOpen={false} meta={`${compactNumber(msg.reasoning_content.length)} ${t.chars}`} title={t.thinking}>
-              <LongText text={msg.reasoning_content} />
-            </Fold>
-          )}
-          {text && <Markdown text={text} />}
+          {msg.reasoning_content?.trim() &&
+            (levels.thinking === 'min' ? (
+              <MinBar label={t.thinking} meta={`${compactNumber(msg.reasoning_content.length)} ${t.chars}`} text={msg.reasoning_content} />
+            ) : (
+              <div className="mb-2 rounded border border-(--ui-stroke-tertiary) px-2 py-1">
+                <div className="mb-1 text-[0.625rem] uppercase tracking-wide text-(--ui-text-tertiary)">{t.thinking}</div>
+                <Body level={levels.thinking} text={msg.reasoning_content} />
+              </div>
+            ))}
+          {text && <Body level={level} markdown text={text} />}
           {msg.tool_calls && msg.tool_calls.length > 0 && (
             <div className="mt-2 space-y-1">
               {msg.tool_calls.map((tc, i) => (
@@ -221,7 +299,7 @@ export function MessageCard({ msg, index, isNew, t }: { msg: WireMessage; index:
   )
 }
 
-function ToolResult({ text }: { text: string }) {
+function ToolResult({ text, level }: { text: string; level: Level }) {
   const { envelope, body } = unwrapUntrusted(text)
 
   return (
@@ -229,7 +307,7 @@ function ToolResult({ text }: { text: string }) {
       {envelope !== null && (
         <div className="text-[0.6875rem] italic text-(--ui-text-tertiary)">⟨untrusted_tool_result⟩ {envelope.slice(0, 140)}…</div>
       )}
-      <LongText maxChars={3000} mono text={prettyMaybeJson(body)} />
+      <Body level={level} mono text={prettyMaybeJson(body)} />
     </div>
   )
 }
@@ -313,8 +391,9 @@ export function CallCanvas({ call, t }: { call: ApiRequestFull; t: Copy }) {
 }
 
 /** Thinking → output → tool calls of one call. */
-export function CallResponse({ call, t }: { call: ApiRequestFull; t: Copy }) {
+export function CallResponse({ call, t, levels = ALL_FULL }: { call: ApiRequestFull; t: Copy; levels?: Levels }) {
   const outText = wireText(call.response?.content ?? '')
+  const reasoning = call.response?.reasoning ?? ''
 
   return (
     <div className="space-y-3">
@@ -330,17 +409,30 @@ export function CallResponse({ call, t }: { call: ApiRequestFull; t: Copy }) {
           {call.error}
         </div>
       )}
-      {call.response?.reasoning && (
+      {reasoning && (
         <div className="rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-control-hover-background) px-3 py-2">
-          <Fold defaultOpen meta={`${compactNumber(call.response.reasoning.length)} ${t.chars}`} title={t.thinking}>
-            <LongText maxChars={8000} text={call.response.reasoning} />
-          </Fold>
+          {levels.thinking === 'min' ? (
+            <MinBar label={t.thinking} meta={`${compactNumber(reasoning.length)} ${t.chars}`} text={reasoning} />
+          ) : (
+            <>
+              <div className="mb-1 text-[0.625rem] uppercase tracking-wide text-(--ui-text-tertiary)">
+                {t.thinking} <span className="ml-1 font-mono normal-case">{compactNumber(reasoning.length)} {t.chars}</span>
+              </div>
+              <Body level={levels.thinking} text={reasoning} />
+            </>
+          )}
         </div>
       )}
       {outText && (
         <div className="rounded-md border-l-[3px] border-l-emerald-500/70 bg-emerald-500/5 px-3 py-2">
-          <div className="mb-1 text-[0.625rem] uppercase tracking-wide text-(--ui-text-tertiary)">{t.output}</div>
-          <Markdown text={outText} />
+          {levels.output === 'min' ? (
+            <MinBar label={t.output} meta={`${compactNumber(outText.length)} ${t.chars}`} text={outText} />
+          ) : (
+            <>
+              <div className="mb-1 text-[0.625rem] uppercase tracking-wide text-(--ui-text-tertiary)">{t.output}</div>
+              <Body level={levels.output} markdown text={outText} />
+            </>
+          )}
         </div>
       )}
       {call.response?.tool_calls && call.response.tool_calls.length > 0 && (
@@ -387,6 +479,14 @@ export interface Copy {
   list: string
   boardHint: string
   prefixNote: (n: number, chars: number) => string
+  levelFull: string
+  levelHalf: string
+  levelMin: string
+  all: string
+  kinds: Record<Kind, string>
+  prev: string
+  next: string
+  same: string
 }
 
 export const COPY: Record<'en' | 'ru', Copy> = {
@@ -420,8 +520,16 @@ export const COPY: Record<'en' | 'ru', Copy> = {
     extra: 'request parameters',
     board: 'Board',
     list: 'List',
-    boardHint: 'drag · scroll = pan · ⌘/pinch = zoom · 0 = fit',
-    prefixNote: (n, chars) => `${n} msgs / ${compactNumber(chars)} chars same as previous call`
+    boardHint: '← → calls · drag/scroll = pan · ⌘/pinch = zoom · 0 fit width · 9 fit all',
+    prefixNote: (n, chars) => `${n} msgs / ${compactNumber(chars)} chars same as previous call`,
+    levelFull: 'full',
+    levelHalf: 'half',
+    levelMin: 'collapsed',
+    all: 'all',
+    kinds: { assistant: 'assistant', output: 'output', system: 'system', thinking: 'thinking', tool: 'tool results', user: 'user' },
+    prev: 'previous call (←)',
+    next: 'next call (→)',
+    same: 'same as prev'
   },
   ru: {
     title: 'Вызовы LLM',
@@ -453,8 +561,16 @@ export const COPY: Record<'en' | 'ru', Copy> = {
     extra: 'параметры запроса',
     board: 'Доска',
     list: 'Список',
-    boardHint: 'тянуть · скролл = панорама · ⌘/щипок = зум · 0 = вписать',
-    prefixNote: (n, chars) => `${n} сообщ. / ${compactNumber(chars)} симв. как в прошлом вызове`
+    boardHint: '← → вызовы · тянуть/скролл = панорама · ⌘/щипок = зум · 0 по ширине · 9 целиком',
+    prefixNote: (n, chars) => `${n} сообщ. / ${compactNumber(chars)} симв. как в прошлом вызове`,
+    levelFull: 'полностью',
+    levelHalf: 'наполовину',
+    levelMin: 'свернуть',
+    all: 'всё',
+    kinds: { assistant: 'assistant', output: 'ответ', system: 'system', thinking: 'thinking', tool: 'tool-результаты', user: 'user' },
+    prev: 'предыдущий вызов (←)',
+    next: 'следующий вызов (→)',
+    same: 'как в прошлом'
   }
 }
 
