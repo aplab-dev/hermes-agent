@@ -161,6 +161,26 @@ def list_requests(session_id: str, limit: int = 500) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def list_requests_full(session_id: str, limit: int = 200) -> list[dict]:
+    """Every call of the session WITH parsed request/response bodies (the board view lays them all out)."""
+    if not db_path().exists():
+        return []
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM api_requests WHERE session_id = ? ORDER BY id ASC LIMIT ?",
+                            (session_id, limit)).fetchall()
+    out = []
+    for row in rows:
+        d = dict(row)
+        for key in ("request_json", "response_json"):
+            raw = d.pop(key)
+            try:
+                d[key[:-5]] = json.loads(raw) if raw else None
+            except Exception:  # noqa: BLE001
+                d[key[:-5]] = None
+        out.append(d)
+    return out
+
+
 def get_request(row_id: int) -> Optional[dict]:
     if not db_path().exists():
         return None

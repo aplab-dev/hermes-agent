@@ -60,6 +60,17 @@ export function listSessionRequests(sessionId: string): Promise<SessionRequestsR
   return hermesApi<SessionRequestsResponse>({ path: `/api/requests/${encodeURIComponent(sessionId)}` })
 }
 
+export interface SessionRequestsFullResponse {
+  requests: ApiRequestFull[]
+  stats: Record<string, null | number>
+  session_id: string
+}
+
+/** Every call with bodies — the board lays the whole session out at once. */
+export function listSessionRequestsFull(sessionId: string): Promise<SessionRequestsFullResponse> {
+  return hermesApi<SessionRequestsFullResponse>({ path: `/api/requests/${encodeURIComponent(sessionId)}?full=1` })
+}
+
 export function getSessionRequest(sessionId: string, id: number): Promise<ApiRequestFull> {
   return hermesApi<ApiRequestFull>({ path: `/api/requests/${encodeURIComponent(sessionId)}/${id}` })
 }

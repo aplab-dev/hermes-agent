@@ -38,13 +38,14 @@ def _resolve_session_ids(session_id: str) -> list[str]:
 
 
 @router.get("/api/requests/{session_id}")
-async def list_session_requests(session_id: str, profile: Optional[str] = None):
-    """Light rows (no bodies) for the calls list + per-session totals."""
+async def list_session_requests(session_id: str, profile: Optional[str] = None, full: int = 0):
+    """Rows for the calls list + per-session totals; ``full=1`` includes parsed request/response bodies
+    (the board view lays every call out at once)."""
     def _run():
         with _profile_scope(profile):
             store = _store()
             for sid in _resolve_session_ids(session_id):
-                rows = store.list_requests(sid)
+                rows = store.list_requests_full(sid) if full else store.list_requests(sid)
                 if rows:
                     return {"requests": rows, "stats": store.session_stats(sid), "session_id": sid}
             return {"requests": [], "stats": {}, "session_id": session_id}
